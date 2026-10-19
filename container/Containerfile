@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec-dev libswresample-dev libdbus-1-dev libxkbfile-dev libssl-dev libvulkan-dev \
     libcurl4-openssl-dev libedit-dev libx11-dev libxext-dev libxcb1-dev \
     libxcb-shm0-dev libx11-xcb-dev libxfixes-dev libxi-dev libxrender-dev libwayland-dev \
-    glslang-tools spirv-tools gcc g++ sudo squashfs-tools desktop-file-utils \
+    glslang-tools spirv-tools gcc g++ sudo squashfs-tools desktop-file-utils nasm \
  && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
  && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" > /etc/apt/sources.list.d/llvm.list \

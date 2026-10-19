@@ -1,0 +1,64 @@
+diff --color -ru a/src/external/cocotron/AppKit/NSWindow.m b/src/external/cocotron/AppKit/NSWindow.m
+--- a/src/external/cocotron/AppKit/NSWindow.m	2026-10-19 06:21:24.237083926 +0200
++++ b/src/external/cocotron/AppKit/NSWindow.m	2026-10-19 06:21:24.241083909 +0200
+@@ -1202,6 +1202,10 @@
+         if(trace) {fprintf(trace,"DRAG pid=%d movable=%d type=%ld\n",getpid(),_isMovable,(long)[event type]);fclose(trace);}
+     }
+     if (!_isMovable || [event type] != NSLeftMouseDown) return;
++    /* darling-lol: let the window manager do the move when the backend supports it (X11). */
++    if ([_platformWindow respondsToSelector:@selector(beginWindowManagerMove)] &&
++        [(id)_platformWindow beginWindowManagerMove])
++        return;
+     /* darling-lol: follow the pointer in absolute screen coordinates. The window-relative location of every drag event is
+      * measured against where the window really is, which lags behind setFrameOrigin: (the compositor moves the window
+      * later), so converting it back with the new frame fed the lag into the next position and the window jumped (League's
+diff --color -ru a/src/external/cocotron/AppKit/X11.backend/X11Window.h b/src/external/cocotron/AppKit/X11.backend/X11Window.h
+--- a/src/external/cocotron/AppKit/X11.backend/X11Window.h	2026-10-19 06:21:24.241083909 +0200
++++ b/src/external/cocotron/AppKit/X11.backend/X11Window.h	2026-10-19 06:21:24.245083892 +0200
+@@ -86,6 +86,7 @@
+ - (NSPoint) transformPoint: (NSPoint) pos;
+ 
+ - (Window) windowHandle;
++- (BOOL) beginWindowManagerMove;
+ - (BOOL) handleRemoteFrameExpose: (Window) window;
+ 
+ - (void) frameChanged;
+diff --color -ru a/src/external/cocotron/AppKit/X11.backend/X11Window.m b/src/external/cocotron/AppKit/X11.backend/X11Window.m
+--- a/src/external/cocotron/AppKit/X11.backend/X11Window.m	2026-10-19 06:21:24.237083926 +0200
++++ b/src/external/cocotron/AppKit/X11.backend/X11Window.m	2026-10-19 06:21:24.245083892 +0200
+@@ -1103,6 +1103,35 @@
+     return YES;
+ }
+ 
++/* darling-lol: hand an interactive move to the window manager (EWMH _NET_WM_MOVERESIZE), as
++ * GTK/Qt do for client-side titlebars. Moving the window ourselves with XMoveWindow lags behind
++ * the pointer and does nothing under XWayland (the compositor owns the window position). The
++ * pointer grab from the button press must be released first so the WM can take the drag. */
++- (BOOL) beginWindowManagerMove {
++    if (getenv("RCLOL_WM_MOVE") && getenv("RCLOL_WM_MOVE")[0] == '0')
++        return NO;
++    Window root = DefaultRootWindow(_display), child;
++    int rootX, rootY, winX, winY;
++    unsigned int mask;
++    if (!XQueryPointer(_display, _window, &root, &child, &rootX, &rootY, &winX, &winY, &mask))
++        return NO;
++    XUngrabPointer(_display, CurrentTime);
++    XEvent event;
++    memset(&event, 0, sizeof(event));
++    event.xclient.type = ClientMessage;
++    event.xclient.window = _window;
++    event.xclient.message_type = XInternAtom(_display, "_NET_WM_MOVERESIZE", False);
++    event.xclient.format = 32;
++    event.xclient.data.l[0] = rootX;
++    event.xclient.data.l[1] = rootY;
++    event.xclient.data.l[2] = 8; /* _NET_WM_MOVERESIZE_MOVE */
++    event.xclient.data.l[3] = Button1;
++    event.xclient.data.l[4] = 1; /* source: normal application */
++    XSendEvent(_display, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &event);
++    XFlush(_display);
++    return YES;
++}
++
+ - (Window) windowHandle {
+     return _window;
+ }

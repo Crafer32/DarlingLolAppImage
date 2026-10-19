@@ -22,7 +22,9 @@ if [ "${STEP:-all}" = all ]; then
 	git -C "$WORK/darling-lol" checkout -q "$DARLING_LOL_REF"
 	git -C "$WORK/darling-lol" apply "$REPO/patches/darling-lol-tools-appimage.patch"
 	run 'git lfs install --skip-repo >/dev/null; python3 scripts/configure.py --guest-user lol --prefix /build/prefix && python3 scripts/prepare.py'
-	git -C "$WORK/darling-lol/build/darling-src" apply "$REPO/patches/darling-rootless.patch"
+	run 'sh /repo/scripts/build-ffmpeg.sh'
+	patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-rootless.patch"
+	patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-window-drag.patch"
 	run "cmake -S build/darling-src -B build/darling-src/build -G 'Unix Makefiles' -DCMAKE_BUILD_TYPE= -DTARGET_i386=OFF \
 		-DCMAKE_INSTALL_PREFIX=/usr/local -DENABLE_METAL=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
 		-DCMAKE_C_FLAGS='-O3 -march=x86-64-v2 -mtune=generic -pipe' -DCMAKE_CXX_FLAGS='-O3 -march=x86-64-v2 -mtune=generic -pipe' \

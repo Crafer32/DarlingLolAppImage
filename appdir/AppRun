@@ -21,6 +21,17 @@ export RCLOL_REGION=${RCLOL_REGION:-EUW}
 export MESA_SHADER_CACHE_DIR=${MESA_SHADER_CACHE_DIR:-$BASE/cache}
 
 say() { printf 'darling-lol: %s\n' "$*" >&2; }
+# Desktop notification that replaces the previous one, so long steps don't look frozen
+NOTIFY_ID=
+note() {
+	say "$*"
+	command -v notify-send >/dev/null 2>&1 || return 0
+	if [ -n "$NOTIFY_ID" ]; then
+		notify-send -a "League of Legends" -i darling-lol -r "$NOTIFY_ID" "League of Legends" "$*" 2>/dev/null || true
+	else
+		NOTIFY_ID=$(notify-send -a "League of Legends" -i darling-lol -p "League of Legends" "$*" 2>/dev/null) || NOTIFY_ID=
+	fi
+}
 die() {
 	say "$*"
 	command -v notify-send >/dev/null 2>&1 && notify-send -i dialog-error "darling-lol" "$*" 2>/dev/null || true
@@ -39,7 +50,7 @@ command -v python3 >/dev/null 2>&1 || die "python3 is missing. Install it with y
 # ---- 2. Older layout (r1-r3: runtime in ~/.local/share, prefix in ~/.darling-lol) -------
 if [ -z "${DARLING_LOL_HOME:-}" ] && [ -d "$BASE/Applications" ] && [ ! -d "$BASE/prefix" ]; then
 	pgrep -f "darlingserver $BASE" >/dev/null 2>&1 && die "Darling is still running: close the game and the clients first."
-	say "Moving everything into $BASE (one folder)..."
+	note "Moving everything into $BASE (one folder)..."
 	mv "$BASE" "$BASE.old-layout"
 	mkdir -p "$BASE"
 	mv "$BASE.old-layout" "$BASE/prefix"
@@ -50,7 +61,7 @@ fi
 # ---- 3. Runtime (once per version) ------------------------------------------------------
 # Darling keeps running after this AppImage exits, so it can't live in the FUSE mount.
 if [ ! -f "$RT/.complete" ]; then
-	say "First run of $VERSION: unpacking the runtime (about 1 GB, one time)..."
+	note "First run of $VERSION: unpacking the runtime (one time, about a minute)..."
 	rm -rf "$RT.partial"
 	mkdir -p "$RT.partial"
 	cp -a "$APPDIR/usr/." "$RT.partial/"
@@ -79,13 +90,18 @@ if [ ! -f "$PROJECT/.version" ] || [ "$(cat "$PROJECT/.version")" != "$VERSION" 
 	echo "$VERSION" > "$PROJECT/.version"
 fi
 cd "$PROJECT"
-python3 scripts/configure.py --guest-user "$GUEST_USER" --prefix "$DPREFIX" --sdk "$RT/libexec/darling" >/dev/null
+# Render the launcher scripts only when something they depend on changed
+STAMP="$VERSION|$GUEST_USER|$DPREFIX|$RT"
+if [ ! -f .configured ] || [ "$(cat .configured)" != "$STAMP" ]; then
+	python3 scripts/configure.py --guest-user "$GUEST_USER" --prefix "$DPREFIX" --sdk "$RT/libexec/darling" >/dev/null
+	echo "$STAMP" > .configured
+fi
 
 # ---- 4. Prefix and per-user overlays --------------------------------------------------
 if [ ! -f "$GUEST_HOME/.darling-lol-runtime" ] || [ "$(cat "$GUEST_HOME/.darling-lol-runtime")" != "$VERSION" ]; then
 	new_prefix=
 	[ -e "$DPREFIX" ] || new_prefix=1
-	say "Preparing the macOS prefix $DPREFIX ..."
+	note "Preparing the macOS prefix (first time only)..."
 	darling shell /usr/bin/true
 	mkdir -p "$DPREFIX/private/tmp"
 	chmod 1777 "$DPREFIX/private/tmp"
@@ -111,4 +127,5 @@ if [ ! -d "$DPREFIX/Users/Shared/Riot Games/Riot Client.app" ] && [ ! -e "$DPREF
 	say "Riot Client is not installed yet: starting the installer (region $RCLOL_REGION)."
 	exec sh scripts/installer.sh "$(echo "$RCLOL_REGION" | tr '[:upper:]' '[:lower:]')"
 fi
+note "Starting the Riot Client... (the first window can take up to a minute)"
 exec sh scripts/run.sh

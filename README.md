@@ -70,12 +70,14 @@ What the build adds on top of darling-lol:
 |---|---|
 | `patches/darling-rootless.patch` | `darling`/`darlingserver`: rootless user namespace mode, relocatable install |
 | `patches/darling-lol-tools-appimage.patch` | runtime built for generic x86-64-v2; xshm host library path from `$DARLING_XSHM_HOST_LIBRARY` |
-| `scripts/build-appdir.sh` | assembles the AppDir and bundles the libraries whose names change between distros (ffmpeg 6, libjpeg 8, libgif 7, libtiff 6, fuse2, libffi 8, LLVM 23) |
+| `scripts/build-appdir.sh` | assembles the AppDir and bundles the libraries whose names change between distros (libjpeg 8, libgif 7, libtiff 6, fuse2, libffi 8, LLVM 23) |
+| `scripts/build-ffmpeg.sh` | minimal ffmpeg 6.1 (decoders only, no external libraries) with the sonames Darling expects |
+| `patches/darling-window-drag.patch` | dragging frameless windows (League/Riot clients) is handed to the window manager (`_NET_WM_MOVERESIZE`), which also works under XWayland |
 | `scripts/fix-llvm-path.py` | makes Iridium (Metal shaders) load the bundled LLVM instead of the build machine's path |
 | `appdir/AppRun` | launcher and first-run setup |
 | `appdir/fonts.conf` | hides Type 1 fonts, which crash the League client |
 
-The AppImage itself (~230 MB) is published as a Release, not committed.
+The AppImage itself (~180 MB) is published as a Release, not committed.
 
 ---
 
