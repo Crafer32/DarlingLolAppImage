@@ -1,21 +1,24 @@
 #!/bin/sh
-# darling-lol AppImage (unofficial): League of Legends for macOS on Darling, rootless.
+# DarlingLolAppImage: League of Legends (macOS client) on Darling, rootless.
 #
-#   ./darling-lol.AppImage               launch (first run installs everything per user)
-#   ./darling-lol.AppImage --installer   (re)install the Riot Client (RCLOL_REGION=EUW by default)
-#   ./darling-lol.AppImage --shell       open a Darling shell in the prefix
-#   ./darling-lol.AppImage --shutdown    stop the Darling container
-#   ./darling-lol.AppImage --check       only check whether this PC is supported
+#   ./darling-lol.AppImage               launch (the first run sets everything up)
+#   ./darling-lol.AppImage --installer   (re)install the Riot Client (RCLOL_REGION, default EUW)
+#   ./darling-lol.AppImage --shell       open a shell inside Darling
+#   ./darling-lol.AppImage --shutdown    stop Darling
 #
-# Nothing here needs root. Files go to ~/.local/share/darling-lol (runtime) and
-# $DPREFIX (default ~/.darling-lol, the macOS prefix with Riot and the game).
+# Everything lives in one folder, ~/.darling-lol (DARLING_LOL_HOME): delete it and it's gone.
+#   runtime/<version>   Darling + darling-lol runtime, unpacked from this AppImage
+#   project/            launcher scripts rendered for this user
+#   prefix/             the "Mac": Riot Client and the game
+#   cache/              Mesa shader cache
 set -eu
 APPDIR=${APPDIR:-$(dirname "$(readlink -f "$0")")}
 VERSION=$(cat "$APPDIR/usr/share/darling-lol/VERSION")
-DATA=${XDG_DATA_HOME:-$HOME/.local/share}/darling-lol
-RT=$DATA/runtime/$VERSION
-export DPREFIX=${DPREFIX:-$HOME/.darling-lol}
+BASE=${DARLING_LOL_HOME:-$HOME/.darling-lol}
+RT=$BASE/runtime/$VERSION
+export DPREFIX=${DPREFIX:-$BASE/prefix}
 export RCLOL_REGION=${RCLOL_REGION:-EUW}
+export MESA_SHADER_CACHE_DIR=${MESA_SHADER_CACHE_DIR:-$BASE/cache}
 
 say() { printf 'darling-lol: %s\n' "$*" >&2; }
 die() {
@@ -25,63 +28,36 @@ die() {
 }
 vge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 
-# ---- 1. Is this PC supported? -------------------------------------------------------
-check() {
-	[ "$(uname -m)" = x86_64 ] || die "Only x86-64 PCs are supported (this one is $(uname -m))."
-	k=$(uname -r | sed 's/[^0-9.].*//')
-	vge "$k" 5.11 || die "Linux $k is too old: rootless mode needs Linux 5.11 or newer."
-	g=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
-	[ -n "$g" ] || die "This system does not use glibc (musl distros such as Alpine or Void-musl are not supported)."
-	vge "$g" 2.39 || die "glibc $g is too old: needs 2.39+ (Ubuntu 24.04, Debian 13, Fedora 40, Arch...)."
-	command -v python3 >/dev/null 2>&1 || die "python3 is missing. Install it with your package manager and try again."
-	[ -n "${DISPLAY:-}" ] || die "No X11 display (DISPLAY is empty). Use an X11 session or Wayland with XWayland."
-	if [ -r /proc/sys/kernel/unprivileged_userns_clone ] && [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = 0 ]; then
-		die "Unprivileged user namespaces are disabled. Run once: sudo sysctl -w kernel.unprivileged_userns_clone=1 (see README)."
-	fi
-	if [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
-	   [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ] &&
-	   [ ! -e /etc/apparmor.d/darling-lol ]; then
-		die "AppArmor blocks user namespaces (Ubuntu 24.04+). Install the profile once: run this AppImage with --apparmor-profile and follow the instructions."
-	fi
-	for v in $(cat /sys/class/drm/card*/device/vendor 2>/dev/null | sort -u); do
-		case "$v" in
-			0x10de) say "NVIDIA GPU detected: not supported/tested; it may not work." ;;
-			0x8086) say "Intel GPU detected: experimental." ;;
-		esac
-	done
-}
+# ---- 1. Basic checks (clear errors instead of strange failures later) -----------------
+k=$(uname -r | sed 's/[^0-9.].*//')
+vge "$k" 5.15 || die "Linux $k is too old: needs Linux 5.15 or newer."
+g=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
+vge "${g:-0}" 2.39 || die "glibc ${g:-not found}: needs glibc 2.39 or newer."
+command -v python3 >/dev/null 2>&1 || die "python3 is missing. Install it with your package manager and try again."
+[ -n "${DISPLAY:-}" ] || die "No X11 display. Use an X11 session or Wayland with XWayland."
 
-case "${1:-}" in
-	--check) check; say "This PC looks supported."; exit 0 ;;
-	--apparmor-profile)
-		cat <<EOF
-Ubuntu 24.04+ only. Run these two commands once (they need sudo):
+# ---- 2. Older layout (r1-r3: runtime in ~/.local/share, prefix in ~/.darling-lol) -------
+if [ -z "${DARLING_LOL_HOME:-}" ] && [ -d "$BASE/Applications" ] && [ ! -d "$BASE/prefix" ]; then
+	pgrep -f "darlingserver $BASE" >/dev/null 2>&1 && die "Darling is still running: close the game and the clients first."
+	say "Moving everything into $BASE (one folder)..."
+	mv "$BASE" "$BASE.old-layout"
+	mkdir -p "$BASE"
+	mv "$BASE.old-layout" "$BASE/prefix"
+	[ -d "$BASE.workdir" ] && mv "$BASE.workdir" "$BASE/prefix.workdir"
+	rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/darling-lol"
+fi
 
-sudo tee /etc/apparmor.d/darling-lol >/dev/null <<'PROFILE'
-abi <abi/4.0>,
-include <tunables/global>
-profile darling-lol /home/*/.local/share/darling-lol/runtime/*/bin/darling flags=(unconfined) {
-  userns,
-}
-PROFILE
-sudo apparmor_parser -r /etc/apparmor.d/darling-lol
-EOF
-		exit 0 ;;
-esac
-check
-
-# ---- 2. Runtime in the user's home (once per version) ---------------------------------
+# ---- 3. Runtime (once per version) ------------------------------------------------------
 # Darling keeps running after this AppImage exits, so it can't live in the FUSE mount.
 if [ ! -f "$RT/.complete" ]; then
-	say "First run of $VERSION: installing the runtime in $RT (about 1 GB, one time)..."
+	say "First run of $VERSION: unpacking the runtime (about 1 GB, one time)..."
 	rm -rf "$RT.partial"
 	mkdir -p "$RT.partial"
 	cp -a "$APPDIR/usr/." "$RT.partial/"
 	touch "$RT.partial/.complete"
 	rm -rf "$RT"
 	mv "$RT.partial" "$RT"
-	# keep only this version
-	for old in "$DATA"/runtime/*; do [ "$old" = "$RT" ] || rm -rf "$old"; done
+	for old in "$BASE"/runtime/*; do [ "$old" = "$RT" ] || rm -rf "$old"; done
 fi
 
 export PATH="$RT/bin:$PATH"
@@ -90,7 +66,7 @@ export DARLING_RUNNER_DIR="$RT/bin"
 export DARLING_XSHM_HOST_LIBRARY="$RT/lib/darling-lol/libdarling-xshm.so"
 # Type 1 (X11 core) fonts crash the CEF renderer ("Preparing browse"): hide them.
 export FONTCONFIG_FILE="$RT/share/darling-lol/fonts.conf"
-PROJECT=$DATA/project
+PROJECT=$BASE/project
 GUEST_USER=$(id -un)
 case "$GUEST_USER" in *[!A-Za-z0-9_-]*) die "User name '$GUEST_USER' must only use letters, digits, _ or -." ;; esac
 GUEST_HOME=$DPREFIX/Users/$GUEST_USER

@@ -1,111 +1,82 @@
 # DarlingLolAppImage
 
-League of Legends (the macOS client) on Linux in a single file, without root.
+> [!WARNING]
+> **Don't use your main account.** There is a real risk of getting banned: we have already
+> seen 3-day bans while testing. Play with a secondary account.
 
-This is an AppImage of [darling-lol](https://github.com/lucannez64/darling-lol), the Darling
-setup that gets the Mac version of LoL running. The original needs you to build Darling
-yourself and install it with `sudo` (the `darling` binary is setuid). I wanted something that
-works like Wine: download, run, play. No root, nothing installed outside your home.
+League of Legends (the macOS client) on Linux, packaged as a single AppImage. Run it and the
+first launch sets everything up and opens the Riot Client.
 
-## Usage
+It is built on top of [darling-lol](https://github.com/lucannez64/darling-lol) by
+[lucannez64](https://github.com/lucannez64), who did the hard part of getting the Mac client
+running on [Darling](https://github.com/darlinghq/darling). This repo only packages it so you
+don't have to build Darling yourself or install anything system-wide. Unofficial, and not
+affiliated with Riot Games.
 
-```sh
-chmod +x darling-lol-*.AppImage
-./darling-lol-*.AppImage --check   # tells you if your PC can run it
-./darling-lol-*.AppImage           # the first time it installs the Riot Client
-```
+Options: `--installer` (reinstall the Riot Client, region from `RCLOL_REGION`, default EUW),
+`--shell` (a shell inside Darling), `--shutdown` (stop Darling).
 
-Sign in, install League from the Riot Client and play. The region defaults to EUW; for
-another one: `RCLOL_REGION=NA ./darling-lol-*.AppImage`.
+Everything goes into one folder, `~/.darling-lol`. If something breaks, or you just want to try
+it and leave no trace, delete that folder and you're back to a clean state:
 
-Other options: `--installer` (reinstall the Riot Client), `--shell` (a shell inside Darling),
-`--shutdown` (stop Darling).
+| Path | What |
+|---|---|
+| `~/.darling-lol/runtime/` | Darling and the darling-lol runtime (~1 GB) |
+| `~/.darling-lol/project/` | launcher scripts |
+| `~/.darling-lol/prefix/` | the "Mac": Riot Client and the game (~40 GB) |
 
-Where it puts things:
+## How it works without root
 
-- `~/.local/share/darling-lol/` the runtime (about 1 GB, unpacked on first run)
-- `~/.darling-lol/` the "Mac": Riot Client and the game (~40 GB). Change it with `DPREFIX=...`
+Darling normally ships a setuid `darling` binary, because it needs to mount an overlay,
+`/dev/shm` and `/proc` and create PID/mount namespaces. This build adds a rootless mode
+(`patches/darling-rootless.patch`): when `darling` isn't setuid, it creates an unprivileged user
+namespace that maps only your own user (the same mechanism Flatpak and bubblewrap use) and does
+those mounts in there. `darlingserver` gets the namespace capabilities and drops them before
+starting launchd, so everything inside the "Mac" runs as your normal user. The install is also
+relocatable, so it can live in your home instead of `/usr/local`. A setuid `darling` ignores
+the new variables, so a classic install isn't affected.
 
-If you already have darling-lol installed you don't need to download the game again; you can
-hard-link it (same disk, takes no extra space):
+## Requirements
 
-```sh
-cp -al ~/.darling/Applications/"League of Legends.app" ~/.darling-lol/Applications/
-cp -a ~/.darling/Users/Shared/"Riot Games"/Metadata/league_of_legends.live* ~/.darling-lol/Users/Shared/"Riot Games"/Metadata/
-```
+| | |
+|---|---|
+| **CPU** | x86-64-v2 |
+| **GPU** | AMD: tested. Intel: experimental. NVIDIA: not supported |
+| **Kernel** | Linux 5.15+ |
+| **libc** | glibc 2.39+ |
+| **Session** | X11 or XWayland |
+| **Needs** | `python3` |
 
-## What you need
+## Reusing an existing darling-lol install
 
-- A 64-bit x86 PC (any Intel or AMD from the last ~15 years)
-- An AMD graphics card with Mesa. That's what I've tested (RX 5700 XT, RX 6600). Intel might
-  work; NVIDIA, not for now
-- Linux 5.11 or newer, glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40, Arch...)
-- X11, or Wayland with XWayland
-- `python3`
-
-Where I've tried it:
-
-- **Void Linux**: the AppImage works, the League client opens and Metal works
-- **Debian 13**: first run and Darling without root, OK
-- **Arch, Fedora, openSUSE Tumbleweed**: should work as is
-- **Ubuntu 24.04+ / Mint 22+**: they need one extra step, below
-- **Alpine, Void musl, ARM**: not supported
-
-### Ubuntu 24.04 and derivatives
-
-Ubuntu blocks user namespaces with AppArmor, and that's what the AppImage uses to avoid root.
-Run this and it prints the two commands that allow it (once, with sudo):
+If you already have darling-lol with the game installed, you don't need to download it again.
+Hard-link it into the AppImage's prefix (same disk, takes no extra space):
 
 ```sh
-./darling-lol-*.AppImage --apparmor-profile
+cp -al ~/.darling/Applications/"League of Legends.app" ~/.darling-lol/prefix/Applications/
+cp -a ~/.darling/Users/Shared/"Riot Games"/Metadata/league_of_legends.live* ~/.darling-lol/prefix/Users/Shared/"Riot Games"/Metadata/
 ```
 
-### Hardened kernels
-
-If your kernel has `kernel.unprivileged_userns_clone=0` (`linux-hardened`, for example):
+## Building
 
 ```sh
-sudo sysctl -w kernel.unprivileged_userns_clone=1
-echo kernel.unprivileged_userns_clone=1 | sudo tee /etc/sysctl.d/90-userns.conf
+scripts/build.sh                 # full build in a rootless podman container (Ubuntu 24.04 + LLVM 23)
+STEP=appimage scripts/build.sh   # only re-assemble the AppImage
 ```
 
-## How root is avoided
+What the build adds on top of darling-lol:
 
-Darling needs root for just a few things: mounting an overlay, `/dev/shm` and `/proc`, and
-creating its own namespaces. All of that can be done inside an unprivileged user namespace,
-the same thing Flatpak and bubblewrap use. The patch in `patches/darling-rootless.patch` does
-that when `darling` isn't setuid: it maps only your own user and passes the capabilities to
-`darlingserver`, which drops them before starting launchd. Everything in the "Mac" runs as your
-normal user.
+| File | Purpose |
+|---|---|
+| `patches/darling-rootless.patch` | `darling`/`darlingserver`: rootless user namespace mode, relocatable install |
+| `patches/darling-lol-tools-appimage.patch` | runtime built for generic x86-64-v2; xshm host library path from `$DARLING_XSHM_HOST_LIBRARY` |
+| `scripts/build-appdir.sh` | assembles the AppDir and bundles the libraries whose names change between distros (ffmpeg 6, libjpeg 8, libgif 7, libtiff 6, fuse2, libffi 8, LLVM 23) |
+| `scripts/fix-llvm-path.py` | makes Iridium (Metal shaders) load the bundled LLVM instead of the build machine's path |
+| `appdir/AppRun` | launcher and first-run setup |
+| `appdir/fonts.conf` | hides Type 1 fonts, which crash the League client |
 
-It also makes the install relocatable (it can live in your home or inside the AppImage instead
-of `/usr/local`). A setuid `darling` ignores those variables, so the classic install isn't
-affected.
-
-## Building it yourself
-
-```sh
-scripts/build.sh                 # everything from scratch, in a podman container
-STEP=appimage scripts/build.sh   # only repackage the AppImage
-```
-
-The container is Ubuntu 24.04 with LLVM 23, so the result runs on anything with glibc 2.39
-or newer. You need about 60 GB free and a while (1-2 hours on a decent PC).
-
-What's in the repo:
-
-- `patches/darling-rootless.patch`: Darling without root
-- `patches/darling-lol-tools-appimage.patch`: generic x86-64-v2 build instead of
-  `-march=native`, and the xshm library path taken from a variable
-- `scripts/build-appdir.sh`: builds the AppImage folder. It bundles the libraries whose name
-  changes between distros (ffmpeg 6, libjpeg 8, libgif 7, libtiff 6, fuse2, libffi 8 and LLVM 23)
-- `scripts/fix-llvm-path.py`: Iridium (the Metal shader translator) loaded LLVM from a fixed
-  path; this makes it use the bundled copy
-- `appdir/AppRun`: the launcher
-- `appdir/fonts.conf`: hides Type 1 fonts, which crash the League client
-
-The AppImage (~230 MB) goes in the Releases, not in the repo.
+The AppImage itself (~230 MB) is published as a Release, not committed.
 
 ---
 
-Not affiliated with Riot Games. Darling and darling-lol keep their licenses (GPL-3.0).
+Darling and darling-lol keep their licenses (GPL-3.0).
