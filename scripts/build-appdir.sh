@@ -17,7 +17,8 @@ LIBS="libjpeg.so.8 libgif.so.7 libtiff.so.6 libfuse.so.2"
 # ffmpeg 6.1 built with decoders/demuxers only and no external libraries (scripts/build-ffmpeg.sh):
 # same sonames Darling expects, ~15 MB instead of ~160 MB of distro codecs
 FFMPEG=${FFMPEG:-/build/ffmpeg-min/lib}
-LLVM=$(readlink -f /usr/lib/llvm-23/lib/libLLVM.so.23.1)
+# Minimal libLLVM for Iridium (scripts/build-llvm-min.sh): no backends, no z3/libxml2/ICU
+LLVM=$(readlink -f /build/llvm-min/lib/libLLVM.so.23.1)
 EXCL='/(libc|libm|libdl|libpthread|librt|ld-linux-x86-64|libresolv|libutil|libgcc_s|libstdc\+\+|libGL|libEGL|libGLX|libGLdispatch|libgbm|libdrm|libvulkan|libX11|libX11-xcb|libXext|libXau|libXdmcp|libXfixes|libXrender|libxcb[^/]*|libwayland[^/]*|libasound|libpulse[^/]*|libdbus-1|libsystemd|libudev|libfontconfig|libfreetype|libexpat|libz|libbsd|libmd|libcap|libgpg-error|libgcrypt|liblzma|libzstd|libbz2|libcrypto|libssl|libselinux|libpcre2-8|libglib-2.0|libgobject-2.0|libgio-2.0|libgmodule-2.0|libblkid|libmount|liblz4)\.so'
 { for l in $LIBS; do p=$(ldconfig -p | grep -m1 -P "^\s$l " | sed 's/.*=> //'); echo $p; ldd $p | awk '{print $3}'; done
   echo $LLVM; ldd $LLVM | awk '{print $3}'; } | grep / | sort -u | grep -v -E "$EXCL" | while read f; do cp -L "$f" $B/; done

@@ -40,6 +40,7 @@ fi
 
 # MAJOR.MINOR: bump MINOR for each release, MAJOR for big changes (1.0, 1.1, ... 2.0)
 VERSION=${VERSION:-$(cat "$REPO/VERSION")}
+run 'sh /repo/scripts/build-llvm-min.sh'
 run "VERSION=$VERSION sh /repo/scripts/build-appdir.sh"
 [ -x "$WORK/appimagetool" ] || curl -sL -o "$WORK/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
 [ -f "$WORK/runtime-x86_64" ] || curl -sL -o "$WORK/runtime-x86_64" https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
