@@ -13,6 +13,11 @@ running on [Darling](https://github.com/darlinghq/darling). This repo only packa
 don't have to build Darling yourself or install anything system-wide. Unofficial, and not
 affiliated with Riot Games.
 
+> [!IMPORTANT]
+> **Sign in with the QR code.** The normal username/password login doesn't work: Riot asks for a
+> captcha that never shows up, so you can't get past it. Choose the QR option in the Riot Client
+> and scan it with the Riot Mobile app.
+
 Options: `--installer` (reinstall the Riot Client, region from `RCLOL_REGION`, default EUW),
 `--shell` (a shell inside Darling), `--shutdown` (stop Darling).
 

@@ -1,9 +1,9 @@
 diff --git a/tools/build-riot-appkit-runtime.py b/tools/build-riot-appkit-runtime.py
-index c4a677d..2ec07ee 100644
+index 6f64261..02e11c8 100644
 --- a/tools/build-riot-appkit-runtime.py
 +++ b/tools/build-riot-appkit-runtime.py
 @@ -15,7 +15,7 @@ link = shlex.split((framework / 'CMakeFiles/AppKit.dir/link.txt').read_text())
- for name in ['NSResponder', 'NSApplication', 'NSWindow', 'NSDisplay', 'NSView', 'NSThemeFrame', 'NSTextInput', 'NSBitmapImageRep', 'NSEvent.subproj/NSEvent_mouse']:
+ for name in ['NSResponder', 'NSApplication', 'NSWindow', 'NSDisplay', 'NSView', 'NSThemeFrame', 'NSTextInput', 'NSBitmapImageRep', 'NSEvent.subproj/NSEvent', 'NSEvent.subproj/NSEvent_mouse']:
      obj = project / f'build/riot-{Path(name).name}.o'
      subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
 -                    '-O3', '-march=native', '-mtune=generic', '-Wno-macro-redefined', '-c',
@@ -87,12 +87,12 @@ index 848c6d5..a9fbddb 100644
   recompiled+=1
  link[link.index('-o')+1]=str(root/'build/riot-libsystem_platform.dylib')
 diff --git a/tools/build-riot-x11-runtime.py b/tools/build-riot-x11-runtime.py
-index 3068865..890d623 100644
+index 9c3d173..232ec45 100644
 --- a/tools/build-riot-x11-runtime.py
 +++ b/tools/build-riot-x11-runtime.py
 @@ -16,7 +16,7 @@ for line in (framework / 'CMakeFiles/X11_backend.dir/flags.make').read_text().sp
  link = shlex.split((framework / 'CMakeFiles/X11_backend.dir/link.txt').read_text())
- for name in ('X11Display', 'X11Window'):
+ for name in ('X11Display', 'X11Window', 'X11SubWindow'):
      obj = project / f'build/riot-{name}.o'
 -    subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'], '-O3', '-march=native', '-mtune=generic', '-Wno-macro-redefined', '-c', str(project / f'build/darling-src/src/external/cocotron/AppKit/X11.backend/{name}.m'), '-o', str(obj)], check=True)
 +    subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'], '-O3', '-march=x86-64-v2', '-mtune=generic', '-Wno-macro-redefined', '-c', str(project / f'build/darling-src/src/external/cocotron/AppKit/X11.backend/{name}.m'), '-o', str(obj)], check=True)
@@ -126,6 +126,24 @@ index 3068865..890d623 100644
      str(project / 'tools/riot-fullscreen-geometry-check.m'), '-o', str(probe)], check=True)
  subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
      '-nostdlib', '-isysroot', sdk, str(probe), '-lSystem', '-lobjc', '-framework', 'Foundation',
+@@ -53,7 +53,7 @@ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+ # Query the actual native hints after Cocoa title/style changes, without mapping windows.
+ probe = project / 'build/riot-window-decorations-check.o'
+ subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
+-    '-O3', '-march=native', '-mtune=generic', '-UNDEBUG', '-Wno-macro-redefined', '-c',
++    '-O3', '-march=x86-64-v2', '-mtune=generic', '-UNDEBUG', '-Wno-macro-redefined', '-c',
+     str(project / 'tools/riot-window-decorations-check.m'), '-o', str(probe)], check=True)
+ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+     '-nostdlib', '-isysroot', sdk, str(probe), '-lSystem', '-lobjc', '-framework', 'AppKit',
+@@ -63,7 +63,7 @@ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+ # Match native AppKit's local event monitor dispatch semantics.
+ probe = project / 'build/riot-event-monitors-check.o'
+ subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
+-    '-O3', '-march=native', '-mtune=generic', '-Wno-macro-redefined', '-c',
++    '-O3', '-march=x86-64-v2', '-mtune=generic', '-Wno-macro-redefined', '-c',
+     str(project / 'tools/riot-event-monitors-check.m'), '-o', str(probe)], check=True)
+ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+     '-nostdlib', '-isysroot', sdk, str(probe), '-lSystem', '-lobjc', '-framework', 'AppKit',
 diff --git a/tools/install-riot-presentation-runtime.sh b/tools/install-riot-presentation-runtime.sh
 index 220f394..6760c44 100644
 --- a/tools/install-riot-presentation-runtime.sh
