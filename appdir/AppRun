@@ -1,0 +1,138 @@
+#!/bin/sh
+# darling-lol AppImage (unofficial): League of Legends for macOS on Darling, rootless.
+#
+#   ./darling-lol.AppImage               launch (first run installs everything per user)
+#   ./darling-lol.AppImage --installer   (re)install the Riot Client (RCLOL_REGION=EUW by default)
+#   ./darling-lol.AppImage --shell       open a Darling shell in the prefix
+#   ./darling-lol.AppImage --shutdown    stop the Darling container
+#   ./darling-lol.AppImage --check       only check whether this PC is supported
+#
+# Nothing here needs root. Files go to ~/.local/share/darling-lol (runtime) and
+# $DPREFIX (default ~/.darling-lol, the macOS prefix with Riot and the game).
+set -eu
+APPDIR=${APPDIR:-$(dirname "$(readlink -f "$0")")}
+VERSION=$(cat "$APPDIR/usr/share/darling-lol/VERSION")
+DATA=${XDG_DATA_HOME:-$HOME/.local/share}/darling-lol
+RT=$DATA/runtime/$VERSION
+export DPREFIX=${DPREFIX:-$HOME/.darling-lol}
+export RCLOL_REGION=${RCLOL_REGION:-EUW}
+
+say() { printf 'darling-lol: %s\n' "$*" >&2; }
+die() {
+	say "$*"
+	command -v notify-send >/dev/null 2>&1 && notify-send -i dialog-error "darling-lol" "$*" 2>/dev/null || true
+	exit 1
+}
+vge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
+
+# ---- 1. Is this PC supported? -------------------------------------------------------
+check() {
+	[ "$(uname -m)" = x86_64 ] || die "Only x86-64 PCs are supported (this one is $(uname -m))."
+	k=$(uname -r | sed 's/[^0-9.].*//')
+	vge "$k" 5.11 || die "Linux $k is too old: rootless mode needs Linux 5.11 or newer."
+	g=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
+	[ -n "$g" ] || die "This system does not use glibc (musl distros such as Alpine or Void-musl are not supported)."
+	vge "$g" 2.39 || die "glibc $g is too old: needs 2.39+ (Ubuntu 24.04, Debian 13, Fedora 40, Arch...)."
+	command -v python3 >/dev/null 2>&1 || die "python3 is missing. Install it with your package manager and try again."
+	[ -n "${DISPLAY:-}" ] || die "No X11 display (DISPLAY is empty). Use an X11 session or Wayland with XWayland."
+	if [ -r /proc/sys/kernel/unprivileged_userns_clone ] && [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" = 0 ]; then
+		die "Unprivileged user namespaces are disabled. Run once: sudo sysctl -w kernel.unprivileged_userns_clone=1 (see README)."
+	fi
+	if [ -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] &&
+	   [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" = 1 ] &&
+	   [ ! -e /etc/apparmor.d/darling-lol ]; then
+		die "AppArmor blocks user namespaces (Ubuntu 24.04+). Install the profile once: run this AppImage with --apparmor-profile and follow the instructions."
+	fi
+	for v in $(cat /sys/class/drm/card*/device/vendor 2>/dev/null | sort -u); do
+		case "$v" in
+			0x10de) say "NVIDIA GPU detected: not supported/tested; it may not work." ;;
+			0x8086) say "Intel GPU detected: experimental." ;;
+		esac
+	done
+}
+
+case "${1:-}" in
+	--check) check; say "This PC looks supported."; exit 0 ;;
+	--apparmor-profile)
+		cat <<EOF
+Ubuntu 24.04+ only. Run these two commands once (they need sudo):
+
+sudo tee /etc/apparmor.d/darling-lol >/dev/null <<'PROFILE'
+abi <abi/4.0>,
+include <tunables/global>
+profile darling-lol /home/*/.local/share/darling-lol/runtime/*/bin/darling flags=(unconfined) {
+  userns,
+}
+PROFILE
+sudo apparmor_parser -r /etc/apparmor.d/darling-lol
+EOF
+		exit 0 ;;
+esac
+check
+
+# ---- 2. Runtime in the user's home (once per version) ---------------------------------
+# Darling keeps running after this AppImage exits, so it can't live in the FUSE mount.
+if [ ! -f "$RT/.complete" ]; then
+	say "First run of $VERSION: installing the runtime in $RT (about 1 GB, one time)..."
+	rm -rf "$RT.partial"
+	mkdir -p "$RT.partial"
+	cp -a "$APPDIR/usr/." "$RT.partial/"
+	touch "$RT.partial/.complete"
+	rm -rf "$RT"
+	mv "$RT.partial" "$RT"
+	# keep only this version
+	for old in "$DATA"/runtime/*; do [ "$old" = "$RT" ] || rm -rf "$old"; done
+fi
+
+export PATH="$RT/bin:$PATH"
+# run.sh puts /usr/local/bin first; this keeps our darling ahead of any system install
+export DARLING_RUNNER_DIR="$RT/bin"
+export DARLING_XSHM_HOST_LIBRARY="$RT/lib/darling-lol/libdarling-xshm.so"
+# Type 1 (X11 core) fonts crash the CEF renderer ("Preparing browse"): hide them.
+export FONTCONFIG_FILE="$RT/share/darling-lol/fonts.conf"
+PROJECT=$DATA/project
+GUEST_USER=$(id -un)
+case "$GUEST_USER" in *[!A-Za-z0-9_-]*) die "User name '$GUEST_USER' must only use letters, digits, _ or -." ;; esac
+GUEST_HOME=$DPREFIX/Users/$GUEST_USER
+
+# ---- 3. Project scripts rendered for this user ---------------------------------------
+if [ ! -f "$PROJECT/.version" ] || [ "$(cat "$PROJECT/.version")" != "$VERSION" ]; then
+	rm -rf "$PROJECT"
+	mkdir -p "$PROJECT"
+	cp -a "$RT/share/darling-lol/project/." "$PROJECT/"
+	echo "$VERSION" > "$PROJECT/.version"
+fi
+cd "$PROJECT"
+python3 scripts/configure.py --guest-user "$GUEST_USER" --prefix "$DPREFIX" --sdk "$RT/libexec/darling" >/dev/null
+
+# ---- 4. Prefix and per-user overlays --------------------------------------------------
+if [ ! -f "$GUEST_HOME/.darling-lol-runtime" ] || [ "$(cat "$GUEST_HOME/.darling-lol-runtime")" != "$VERSION" ]; then
+	new_prefix=
+	[ -e "$DPREFIX" ] || new_prefix=1
+	say "Preparing the macOS prefix $DPREFIX ..."
+	darling shell /usr/bin/true
+	mkdir -p "$DPREFIX/private/tmp"
+	chmod 1777 "$DPREFIX/private/tmp"
+	darling shutdown 2>/dev/null || true
+	mkdir -p "$GUEST_HOME"
+	tar -C "$GUEST_HOME" -xzf "$RT/share/darling-lol/guest-runtime.tar.gz"
+	mkdir -p "$DPREFIX/usr/sbin"
+	install -m755 "$RT/share/darling-lol/system_profiler" "$DPREFIX/usr/sbin/system_profiler"
+	if [ -n "$new_prefix" ]; then
+		python3 tools/configure-darling-platform.py --prefix "$DPREFIX" --provision --write >/dev/null ||
+			say "Could not give the prefix its own platform identity (non-fatal)."
+	fi
+	echo "$VERSION" > "$GUEST_HOME/.darling-lol-runtime"
+fi
+
+# ---- 5. Riot ----------------------------------------------------------------------------
+case "${1:-}" in
+	--shell) shift; exec darling shell "$@" ;;
+	--shutdown) exec darling shutdown ;;
+	--installer) exec sh scripts/installer.sh "$(echo "$RCLOL_REGION" | tr '[:upper:]' '[:lower:]')" ;;
+esac
+if [ ! -d "$DPREFIX/Users/Shared/Riot Games/Riot Client.app" ] && [ ! -e "$DPREFIX/Applications/Riot Client.app" ]; then
+	say "Riot Client is not installed yet: starting the installer (region $RCLOL_REGION)."
+	exec sh scripts/installer.sh "$(echo "$RCLOL_REGION" | tr '[:upper:]' '[:lower:]')"
+fi
+exec sh scripts/run.sh

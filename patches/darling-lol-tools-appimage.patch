@@ -1,0 +1,163 @@
+diff --git a/tools/build-riot-appkit-runtime.py b/tools/build-riot-appkit-runtime.py
+index c4a677d..2ec07ee 100644
+--- a/tools/build-riot-appkit-runtime.py
++++ b/tools/build-riot-appkit-runtime.py
+@@ -15,7 +15,7 @@ link = shlex.split((framework / 'CMakeFiles/AppKit.dir/link.txt').read_text())
+ for name in ['NSResponder', 'NSApplication', 'NSWindow', 'NSDisplay', 'NSView', 'NSThemeFrame', 'NSTextInput', 'NSBitmapImageRep', 'NSEvent.subproj/NSEvent_mouse']:
+     obj = project / f'build/riot-{Path(name).name}.o'
+     subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
+-                    '-O3', '-march=native', '-mtune=generic', '-Wno-macro-redefined', '-c',
++                    '-O3', '-march=x86-64-v2', '-mtune=generic', '-Wno-macro-redefined', '-c',
+                     str(project / f'build/darling-src/src/external/cocotron/AppKit/{name}.m'),
+                     '-o', str(obj)], check=True)
+     link[link.index(f'CMakeFiles/AppKit.dir/{name}.m.o')] = str(obj)
+@@ -24,7 +24,7 @@ subprocess.run(link, cwd=framework, check=True)
+ for name in ['riot-event-coalescing-check', 'riot-scroll-event-check', 'riot-appkit-pump-check', 'riot-window-layout-check']:
+     probe = project / f'build/{name}.o'
+     subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
+-                    '-O3', '-march=native', '-mtune=generic', '-fblocks', '-Wno-macro-redefined', '-c',
++                    '-O3', '-march=x86-64-v2', '-mtune=generic', '-fblocks', '-Wno-macro-redefined', '-c',
+                     str(project / f'tools/{name}.m'), '-o', str(probe)], check=True)
+     subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld', '-nostdlib',
+                     '-isysroot', '@DARLING_SDK@', str(probe), '-lSystem',
+diff --git a/tools/build-riot-cxx-optimized.py b/tools/build-riot-cxx-optimized.py
+index 191780e..feaa1d5 100644
+--- a/tools/build-riot-cxx-optimized.py
++++ b/tools/build-riot-cxx-optimized.py
+@@ -26,7 +26,7 @@ def build(lib, objdir, linkdir, output):
+             jobs.append((rel, obj)); link[i] = str(obj)
+     def compile_one(job):
+         rel, obj = job
+-        subprocess.run(['clang++', *flags['CXX_DEFINES'], *flags['CXX_INCLUDES'], *flags['CXX_FLAGS'], '-O3', '-march=native', '-mtune=generic', '-DNDEBUG',
++        subprocess.run(['clang++', *flags['CXX_DEFINES'], *flags['CXX_INCLUDES'], *flags['CXX_FLAGS'], '-O3', '-march=x86-64-v2', '-mtune=generic', '-DNDEBUG',
+                         '-c', str(src / rel), '-o', str(obj)], check=True)
+     with ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as pool:
+         list(pool.map(compile_one, jobs))
+diff --git a/tools/build-riot-cxx-runtime.py b/tools/build-riot-cxx-runtime.py
+index 51370fa..6cd2f01 100644
+--- a/tools/build-riot-cxx-runtime.py
++++ b/tools/build-riot-cxx-runtime.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Rebuild libc++ and libc++abi with -O3 -march=native -mtune=generic.
++"""Rebuild libc++ and libc++abi with -O3 -march=x86-64-v2 -mtune=generic.
+ 
+ The CMake tree has no build type, so both libraries are clang's -O0 output: the
+ game imports 131 functions from libc++.1.dylib (out-of-line std::string,
+@@ -54,7 +54,7 @@ def build(library, object_dir, link_dir, output):
+         relative, obj = job
+         cxx_flags = [f for f in flags["CXX_FLAGS"] if f not in ("-g", "-O0", "-O1", "-O2")]
+         subprocess.run(["clang++", *flags["CXX_DEFINES"], *flags["CXX_INCLUDES"], *cxx_flags,
+-                        "-O3", "-march=native", "-mtune=generic", "-fno-strict-aliasing",
++                        "-O3", "-march=x86-64-v2", "-mtune=generic", "-fno-strict-aliasing",
+                         "-c", str(source / relative), "-o", str(obj)],
+                        check=True, capture_output=True)
+ 
+diff --git a/tools/build-riot-libc-runtime.py b/tools/build-riot-libc-runtime.py
+index ea28cc6..5b159db 100644
+--- a/tools/build-riot-libc-runtime.py
++++ b/tools/build-riot-libc-runtime.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Rebuild libsystem_c (libc) with -O3 -march=native -mtune=generic.
++"""Rebuild libsystem_c (libc) with -O3 -march=x86-64-v2 -mtune=generic.
+ 
+ The CMake tree is configured with an empty build type, so the installed
+ libsystem_c.dylib is clang's -O0 output except for the three string files
+@@ -101,7 +101,7 @@ def compile_command(target_folder, source, object_path):
+                 continue
+             cleaned.append(token)
+         cleaned = [t for t in cleaned if t not in ("-g", "-O0", "-O1", "-O2")]
+-        cleaned.extend(["-O3", "-march=native", "-mtune=generic", "-fno-strict-aliasing"])
++        cleaned.extend(["-O3", "-march=x86-64-v2", "-mtune=generic", "-fno-strict-aliasing"])
+         return cleaned
+     return None
+ 
+diff --git a/tools/build-riot-platform-strings.py b/tools/build-riot-platform-strings.py
+index 848c6d5..a9fbddb 100644
+--- a/tools/build-riot-platform-strings.py
++++ b/tools/build-riot-platform-strings.py
+@@ -28,7 +28,7 @@ for original in list(link):
+  relative=original.split('platform_obj.dir/',1)[1].removesuffix('.o')
+  obj=root/('build/riot-platform-'+Path(relative).name+'.o')
+  c_flags = [f for f in flags['C_FLAGS'] if f not in ('-g', '-O0', '-O1', '-O2')]
+- subprocess.run(['clang',*flags['C_DEFINES'],*flags['C_INCLUDES'],*c_flags,'-O3','-march=native','-mtune=generic','-fno-builtin','-fno-strict-aliasing','-c',str(root/'build/darling-src/src/external/libplatform'/relative),'-o',str(obj)],check=True)
++ subprocess.run(['clang',*flags['C_DEFINES'],*flags['C_INCLUDES'],*c_flags,'-O3','-march=x86-64-v2','-mtune=generic','-fno-builtin','-fno-strict-aliasing','-c',str(root/'build/darling-src/src/external/libplatform'/relative),'-o',str(obj)],check=True)
+  link[link.index(original)]=str(obj)
+  recompiled+=1
+ link[link.index('-o')+1]=str(root/'build/riot-libsystem_platform.dylib')
+diff --git a/tools/build-riot-x11-runtime.py b/tools/build-riot-x11-runtime.py
+index 3068865..890d623 100644
+--- a/tools/build-riot-x11-runtime.py
++++ b/tools/build-riot-x11-runtime.py
+@@ -16,7 +16,7 @@ for line in (framework / 'CMakeFiles/X11_backend.dir/flags.make').read_text().sp
+ link = shlex.split((framework / 'CMakeFiles/X11_backend.dir/link.txt').read_text())
+ for name in ('X11Display', 'X11Window'):
+     obj = project / f'build/riot-{name}.o'
+-    subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'], '-O3', '-march=native', '-mtune=generic', '-Wno-macro-redefined', '-c', str(project / f'build/darling-src/src/external/cocotron/AppKit/X11.backend/{name}.m'), '-o', str(obj)], check=True)
++    subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'], '-O3', '-march=x86-64-v2', '-mtune=generic', '-Wno-macro-redefined', '-c', str(project / f'build/darling-src/src/external/cocotron/AppKit/X11.backend/{name}.m'), '-o', str(obj)], check=True)
+     link[link.index(f'CMakeFiles/X11_backend.dir/X11.backend/{name}.m.o')] = str(obj)
+ link[link.index('-o') + 1] = str(project / 'build/riot-X11')
+ subprocess.run(link, cwd=framework, check=True)
+@@ -25,7 +25,7 @@ print('Built isolated X11 backend')
+ # Exercise actual backend modifier transitions without compositor shortcuts.
+ probe = project / 'build/riot-modifier-check.o'
+ subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
+-    '-O3', '-march=native', '-mtune=generic', '-Wno-macro-redefined', '-c', str(project / 'tools/riot-modifier-check.m'),
++    '-O3', '-march=x86-64-v2', '-mtune=generic', '-Wno-macro-redefined', '-c', str(project / 'tools/riot-modifier-check.m'),
+     '-o', str(probe)], check=True)
+ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+     '-nostdlib', '-isysroot', sdk, str(probe),
+@@ -35,7 +35,7 @@ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+ # Verify that cached Chromium presentation cannot cover a native game drawable.
+ probe = project / 'build/riot-remote-frame-ownership-check.o'
+ subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
+-    '-O3', '-march=native', '-mtune=generic', '-UNDEBUG', '-Wno-macro-redefined', '-c',
++    '-O3', '-march=x86-64-v2', '-mtune=generic', '-UNDEBUG', '-Wno-macro-redefined', '-c',
+     str(project / 'tools/riot-remote-frame-ownership-check.m'), '-o', str(probe)], check=True)
+ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+     '-nostdlib', '-isysroot', sdk, str(probe), '-lSystem', '-lobjc',
+@@ -44,7 +44,7 @@ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+ 
+ probe = project / 'build/riot-fullscreen-geometry-check.o'
+ subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
+-    '-O3', '-march=native', '-mtune=generic', '-UNDEBUG', '-Wno-macro-redefined', '-c',
++    '-O3', '-march=x86-64-v2', '-mtune=generic', '-UNDEBUG', '-Wno-macro-redefined', '-c',
+     str(project / 'tools/riot-fullscreen-geometry-check.m'), '-o', str(probe)], check=True)
+ subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
+     '-nostdlib', '-isysroot', sdk, str(probe), '-lSystem', '-lobjc', '-framework', 'Foundation',
+diff --git a/tools/install-riot-presentation-runtime.sh b/tools/install-riot-presentation-runtime.sh
+index 220f394..6760c44 100644
+--- a/tools/install-riot-presentation-runtime.sh
++++ b/tools/install-riot-presentation-runtime.sh
+@@ -13,11 +13,11 @@ make -C "$build_dir/src/external/cfnetwork/src" CFNetwork -j8
+ make -C "$build_dir/src/external/configd/SystemConfiguration.fproj" SystemConfiguration -j8
+ make -C "$build_dir/src/external/cocotron/QuartzCore" QuartzCore -j8
+ make -C "$build_dir/src/external/cocotron/AppKit" AppKit X11_backend -j8
+-cc -shared -fPIC -O3 -march=native -mtune=generic -Wall -Wextra \
++cc -shared -fPIC -O3 -march=x86-64-v2 -mtune=generic -Wall -Wextra \
+   "-Wl,-soname,$project_dir/build/libdarling-xshm.so" \
+   "$project_dir/tools/m58f299-xshm.c" -o "$project_dir/build/libdarling-xshm.next.so" \
+   -pthread $(pkg-config --cflags --libs x11 x11-xcb xcb-shm xext)
+-clang -target x86_64-apple-macosx11.0 -fuse-ld=lld -dynamiclib -nostdlib -O3 -march=native -mtune=generic \
++clang -target x86_64-apple-macosx11.0 -fuse-ld=lld -dynamiclib -nostdlib -O3 -march=x86-64-v2 -mtune=generic \
+   -isysroot "@DARLING_SDK@" \
+   -I"$source_dir/src/startup/mldr/elfcalls" \
+   "-DDARLING_XSHM_HOST_LIBRARY=\"$project_dir/build/libdarling-xshm.so\"" \
+diff --git a/tools/m58f299-native-wrapper.c b/tools/m58f299-native-wrapper.c
+index bc0a19c..6033f4d 100644
+--- a/tools/m58f299-native-wrapper.c
++++ b/tools/m58f299-native-wrapper.c
+@@ -5,8 +5,11 @@ extern struct elf_calls *_elfcalls;
+ #error DARLING_XSHM_HOST_LIBRARY must name the native transport library
+ #endif
+ static void *handle;
++extern char *getenv(const char *);
+ __attribute__((constructor)) static void loadTransport(void) {
+-  handle = _elfcalls->dlopen_fatal(DARLING_XSHM_HOST_LIBRARY);
++  /* A relocatable install (AppImage) passes the host path at run time. */
++  const char *path = getenv("DARLING_XSHM_HOST_LIBRARY");
++  handle = _elfcalls->dlopen_fatal(path && path[0] == '/' ? path : DARLING_XSHM_HOST_LIBRARY);
+ }
+ void *DarlingXShmGetCreate(void) {
+   return _elfcalls->dlsym_fatal(handle, "DarlingXShmCreate");

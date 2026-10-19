@@ -1,0 +1,438 @@
+diff --color -ru orig/src/external/darlingserver/internal-include/darlingserver/config.hpp new/src/external/darlingserver/internal-include/darlingserver/config.hpp
+--- a/src/external/darlingserver/internal-include/darlingserver/config.hpp	2026-10-18 21:22:37.969253873 +0200
++++ b/src/external/darlingserver/internal-include/darlingserver/config.hpp	2026-10-18 21:23:53.185011204 +0200
+@@ -3,13 +3,30 @@
+ 
+ #include <darling-config.h>
+ #include <string>
++#include <cstdlib>
++#include <unistd.h>
+ 
+ namespace DarlingServer {
+ 	namespace Config {
+ 		// NOTE: you should not rely on these values being `constexpr`;
+ 		//       in the future, there may be a way to change them during startup.
+ 
+-		constexpr std::string_view defaultMldrPath = LIBEXEC_PATH "/usr/libexec/darling/mldr";
++		// darling-lol rootless: a relocated install (AppImage, ~/.local) passes its libexec
++		// directory in $DARLING_LIBEXEC_PATH. Only honoured when not running as real root.
++		inline const std::string& libexecPath() {
++			static const std::string path = [] {
++				const char* env = getenv("DARLING_LIBEXEC_PATH");
++				if (env && env[0] == '/' && getuid() != 0)
++					return std::string(env);
++				return std::string(LIBEXEC_PATH);
++			}();
++			return path;
++		}
++
++		inline const std::string& mldrPath() {
++			static const std::string path = libexecPath() + "/usr/libexec/darling/mldr";
++			return path;
++		}
+ 
+ 		// this would actually probably be better as a workqueue construction parameter
+ 		constexpr bool singleThreadedWorkQueue = DSERVER_SINGLE_THREADED;
+diff --color -ru orig/src/external/darlingserver/src/call.cpp new/src/external/darlingserver/src/call.cpp
+--- a/src/external/darlingserver/src/call.cpp	2026-10-18 21:22:38.097253460 +0200
++++ b/src/external/darlingserver/src/call.cpp	2026-10-18 21:23:53.185011204 +0200
+@@ -678,7 +678,7 @@
+ 
+ 	if (auto thread = _thread.lock()) {
+ 		if (auto process = thread->process()) {
+-			auto tmpstr = std::string(Config::defaultMldrPath).substr(0, _body.buffer_size - 1);
++			auto tmpstr = std::string(Config::mldrPath()).substr(0, _body.buffer_size - 1);
+ 			auto len = std::min(tmpstr.length() + 1, _body.buffer_size);
+ 
+ 			fullLength = process->vchrootPath().length();
+diff --color -ru orig/src/external/darlingserver/src/darlingserver.cpp new/src/external/darlingserver/src/darlingserver.cpp
+--- a/src/external/darlingserver/src/darlingserver.cpp	2026-10-18 21:22:37.857254234 +0200
++++ b/src/external/darlingserver/src/darlingserver.cpp	2026-10-19 01:46:01.145604559 +0200
+@@ -38,6 +38,7 @@
+ #include <sys/syscall.h>
+ #include <sys/signal.h>
+ #include <filesystem>
++#include <linux/capability.h>
+ 
+ #include <darling-config.h>
+ 
+@@ -266,9 +267,12 @@
+ 		initPath = DARLINGSERVER_INIT_PROCESS;
+ 	}
+ 
+-	setenv("__mldr_DYLD_ROOT_PATH", LIBEXEC_PATH, 1);
++	const std::string& libexec = DarlingServer::Config::libexecPath();
++	const std::string vchrootArg = "mldr!" + libexec + "/usr/libexec/darling/vchroot";
++
++	setenv("__mldr_DYLD_ROOT_PATH", libexec.c_str(), 1);
+ 	setenv("__mldr_sockpath", tmp.c_str(), 1);
+-	execl(DarlingServer::Config::defaultMldrPath.data(), "mldr!" LIBEXEC_PATH "/usr/libexec/darling/vchroot", "vchroot", prefix, initPath, NULL);
++	execl(DarlingServer::Config::mldrPath().c_str(), vchrootArg.c_str(), "vchroot", prefix, initPath, NULL);
+ 
+ 	fprintf(stderr, "Failed to exec launchd: %s\n", strerror(errno));
+ 	abort();
+@@ -448,7 +452,25 @@
+ 	}
+ }
+ 
++// darling-lol rootless: started by a non-setuid `darling` inside an unprivileged user
++// namespace, with the namespace capabilities passed as ambient caps. We already run as the
++// user, so the uid/gid juggling below becomes a no-op and "dropping" means dropping caps.
++static bool rootless = false;
++
++static void drop_all_caps() {
++	struct __user_cap_header_struct hdr = { _LINUX_CAPABILITY_VERSION_3, 0 };
++	struct __user_cap_data_struct data[2] = {};
++
++	prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0);
++	if (syscall(SYS_capset, &hdr, data) != 0) {
++		fprintf(stderr, "Failed to drop capabilities: %s\n", strerror(errno));
++		exit(1);
++	}
++};
++
+ static void temp_drop_privileges(uid_t uid, gid_t gid) {
++	if (rootless)
++		return;
+ 	// it's important to drop GID first, because non-root users can't change their GID
+ 	if (setresgid(gid, gid, 0) < 0) {
+ 		fprintf(stderr, "Failed to temporarily drop group privileges\n");
+@@ -461,6 +483,10 @@
+ };
+ 
+ static void perma_drop_privileges(uid_t uid, gid_t gid) {
++	if (rootless) {
++		drop_all_caps();
++		return;
++	}
+ 	if (setresgid(gid, gid, gid) < 0) {
+ 		fprintf(stderr, "Failed to drop group privileges\n");
+ 		exit(1);
+@@ -472,6 +498,8 @@
+ };
+ 
+ static void regain_privileges() {
++	if (rootless)
++		return;
+ 	if (seteuid(0) < 0) {
+ 		fprintf(stderr, "Failed to regain root EUID\n");
+ 		exit(1);
+@@ -602,9 +630,14 @@
+ 	prefix_length = strlen(prefix);
+ 
+ 	if (getuid() != 0 || getgid() != 0) {
+-		fprintf(stderr, "darlingserver needs to start as root\n");
+-		exit(1);
++		const char* rl = getenv("DARLING_ROOTLESS");
++		if (!rl || rl[0] != '1' || getuid() != (uid_t) originalUID || getgid() != (gid_t) originalGID) {
++			fprintf(stderr, "darlingserver needs to start as root (or rootless from `darling`)\n");
++			exit(1);
++		}
++		rootless = true;
+ 	}
++	unsetenv("DARLING_ROOTLESS");
+ 
+ 	// temporarily drop privileges to perform some prefix work
+ 	temp_drop_privileges(originalUID, originalGID);
+@@ -640,8 +673,10 @@
+ 
+ 		// now set our increased rlimit
+ 		if (setrlimit(RLIMIT_NOFILE, &increased_limit) != 0) {
+-			fprintf(stderr, "Warning: failed to increase FD rlimit: %s\n", strerror(errno));
+-			//exit(1);
++			// rootless: the hard limit can't be raised from a user namespace; use what we have
++			increased_limit.rlim_cur = increased_limit.rlim_max = default_limit.rlim_max;
++			if (setrlimit(RLIMIT_NOFILE, &increased_limit) != 0)
++				fprintf(stderr, "Warning: failed to increase FD rlimit: %s\n", strerror(errno));
+ 		}
+ 
+ #endif
+@@ -689,36 +724,41 @@
+ 			exit(1);
+ 		}
+ 
+-		opts = (char*) malloc(strlen(prefix)*2 + sizeof(LIBEXEC_PATH) + 100);
++		const char* libexec = DarlingServer::Config::libexecPath().c_str();
++		opts = (char*) malloc(strlen(prefix)*2 + strlen(libexec) + 100);
+ 
+ 		const char* opts_fmt = "lowerdir=%s,upperdir=%s,workdir=%s.workdir,index=off";
+ 
+-		sprintf(opts, opts_fmt, LIBEXEC_PATH, prefix, prefix);
++		sprintf(opts, opts_fmt, libexec, prefix, prefix);
+ 
+ 		// Mount overlay onto our prefix
+ 		if (mount("overlay", prefix, "overlay", 0, opts) != 0)
+ 		{
+ 			if (errno == EINVAL) {
+ 				opts_fmt = "lowerdir=%s,upperdir=%s,workdir=%s.workdir";
+-				sprintf(opts, opts_fmt, LIBEXEC_PATH, prefix, prefix);
++				sprintf(opts, opts_fmt, libexec, prefix, prefix);
+ 				if (mount("overlay", prefix, "overlay", 0, opts) == 0) {
+ 					goto mount_ok;
+ 				}
+ 			}
+ 			fprintf(stderr, "Cannot mount overlay: %s\n", strerror(errno));
++			if (rootless)
++				fprintf(stderr, "Rootless Darling needs Linux 5.11+ (overlayfs in user namespaces), and the\n"
++					"prefix must be on a normal local filesystem (ext4, btrfs, xfs, f2fs...).\n");
+ 			exit(1);
+ 		}
+ 
+ 	mount_ok:
+ 		free(opts);
+ 	} else {
+-		std::string fromPath = LIBEXEC_PATH;
++		std::string fromPath = DarlingServer::Config::libexecPath();
+ 		std::string toPath = prefix;
+ 		copyAndSetAttributes(fromPath, toPath);
+ 	}
+ 
+ 	// This is executed once at prefix creation
+-	if (fix_permissions) {
++	// rootless: everything already belongs to the user (and chown to self of unmapped ids fails)
++	if (fix_permissions && !rootless) {
+ 		const char* extra_paths[] = {
+ 			"/private/etc/passwd",
+ 			"/private/etc/master.passwd",
+diff --color -ru orig/src/startup/darling.c new/src/startup/darling.c
+--- a/src/startup/darling.c	2026-10-18 21:22:37.617255009 +0200
++++ b/src/startup/darling.c	2026-10-18 21:23:53.189011191 +0200
+@@ -36,6 +36,10 @@
+ #include <termios.h>
+ #include <pty.h>
+ #include <pwd.h>
++#include <sys/prctl.h>
++#include <sys/syscall.h>
++#include <linux/capability.h>
++#include <limits.h>
+ #include "../shellspawn/shellspawn.h"
+ #include "darling.h"
+ #include "darling-config.h"
+@@ -51,6 +55,18 @@
+ bool g_fixPermissions = false;
+ char g_workingDirectory[4096];
+ 
++// darling-lol rootless: when `darling` is not setuid root, it creates an unprivileged
++// user namespace (like bubblewrap/Flatpak) and does the mounts there. No root needed.
++bool g_rootless = false;
++// Where bin/darlingserver and libexec/darling live. Defaults to the build prefix, but a
++// relocated copy (AppImage, ~/.local) is detected from /proc/self/exe or $DARLING_INSTALL_PREFIX.
++char g_installPrefix[PATH_MAX] = INSTALL_PREFIX;
++
++static void detectInstallPrefix(void);
++static void setupUserNamespace(void);
++static void joinServerUserNamespace(pid_t pidInit);
++static void raiseAmbientCaps(void);
++
+ int main(int argc, char ** argv)
+ {
+ 	pid_t pidInit;
+@@ -63,15 +79,30 @@
+ 
+ 	if (geteuid() != 0)
+ 	{
+-		missingSetuidRoot();
+-		return 1;
++		const char* noRootless = getenv("DARLING_NO_ROOTLESS");
++		if (noRootless && noRootless[0] == '1')
++		{
++			missingSetuidRoot();
++			return 1;
++		}
++		g_rootless = true;
+ 	}
+ 
+ 	g_originalUid = getuid();
+ 	g_originalGid = getgid();
+ 
+-	setuid(0);
+-	setgid(0);
++	if (!g_rootless)
++	{
++		setuid(0);
++		setgid(0);
++	}
++	if (!g_rootless)
++	{
++		// never let the caller's environment steer a root darlingserver
++		unsetenv("DARLING_ROOTLESS");
++		unsetenv("DARLING_LIBEXEC_PATH");
++	}
++	detectInstallPrefix();
+ 
+ 	prefix = getenv("DPREFIX");
+ 	if (!prefix)
+@@ -187,6 +218,8 @@
+ 	}
+ 
+ #if USE_LINUX_4_11_HACK
++	if (g_rootless)
++		joinServerUserNamespace(pidInit);
+ 	joinNamespace(pidInit, CLONE_NEWNS, "mnt");
+ #endif
+ 
+@@ -789,6 +822,9 @@
+ 		exit(1);
+ 	}
+ 
++	if (g_rootless)
++		setupUserNamespace();
++
+ 	if (unshare(CLONE_NEWUTS | CLONE_NEWIPC) != 0)
+ 	{
+ 		fprintf(stderr, "Cannot unshare UTS and IPC namespaces to create darling-init: %s\n", strerror(errno));
+@@ -817,7 +853,23 @@
+ 
+ 		close(pipefd[0]);
+ 
+-		execl(INSTALL_PREFIX "/bin/darlingserver", "darlingserver", prefix, uid_str, gid_str, pipefd_str, g_fixPermissions ? "1" : "0", NULL);
++		char serverPath[PATH_MAX + 32];
++		snprintf(serverPath, sizeof(serverPath), "%s/bin/darlingserver", g_installPrefix);
++
++		if (g_rootless)
++		{
++			// darlingserver must keep the namespace capabilities across execve()
++			raiseAmbientCaps();
++			setenv("DARLING_ROOTLESS", "1", 1);
++		}
++		if (strcmp(g_installPrefix, INSTALL_PREFIX) != 0)
++		{
++			char libexecPath[PATH_MAX + 32];
++			snprintf(libexecPath, sizeof(libexecPath), "%s/libexec/darling", g_installPrefix);
++			setenv("DARLING_LIBEXEC_PATH", libexecPath, 1);
++		}
++
++		execl(serverPath, "darlingserver", prefix, uid_str, gid_str, pipefd_str, g_fixPermissions ? "1" : "0", NULL);
+ 
+ 		fprintf(stderr, "Failed to start darlingserver\n");
+ 		exit(1);
+@@ -1209,3 +1261,129 @@
+ 		exit(1);
+ 	}
+ }
++
++// ---- darling-lol rootless helpers ----------------------------------------------------
++
++static void detectInstallPrefix(void)
++{
++	const char* env = getenv("DARLING_INSTALL_PREFIX");
++	char exe[PATH_MAX], probe[PATH_MAX + 32];
++	struct stat st;
++
++	// Only a non-setuid binary may relocate itself: a setuid one must not trust the
++	// environment or its own location (it would run a user-chosen darlingserver as root).
++	if (!g_rootless)
++		return;
++
++	if (env && env[0] == '/' && strlen(env) < sizeof(g_installPrefix))
++	{
++		strcpy(g_installPrefix, env);
++		return;
++	}
++
++	ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
++	if (len <= 0)
++		return;
++	exe[len] = '\0';
++
++	// <prefix>/bin/darling -> <prefix>
++	char* slash = strrchr(exe, '/');
++	if (!slash) return;
++	*slash = '\0';
++	slash = strrchr(exe, '/');
++	if (!slash || strcmp(slash, "/bin") != 0) return;
++	*slash = '\0';
++
++	snprintf(probe, sizeof(probe), "%s/bin/darlingserver", exe);
++	if (stat(probe, &st) == 0 && strlen(exe) < sizeof(g_installPrefix))
++		strcpy(g_installPrefix, exe);
++}
++
++static int writeProcFile(const char* path, const char* text)
++{
++	int fd = open(path, O_WRONLY | O_CLOEXEC);
++	if (fd < 0)
++		return -1;
++	ssize_t n = write(fd, text, strlen(text));
++	int saved = errno;
++	close(fd);
++	errno = saved;
++	return n == (ssize_t) strlen(text) ? 0 : -1;
++}
++
++static void setupUserNamespace(void)
++{
++	char map[64];
++
++	if (unshare(CLONE_NEWUSER) != 0)
++	{
++		fprintf(stderr, "Darling (rootless) cannot create a user namespace: %s\n", strerror(errno));
++		fprintf(stderr, "Unprivileged user namespaces are disabled on this system. Either:\n"
++			"  - enable them (e.g. sysctl kernel.unprivileged_userns_clone=1, or on Ubuntu 24.04+\n"
++			"    install the AppArmor profile from the darling-lol docs), or\n"
++			"  - make `darling` setuid root (classic Darling install).\n");
++		exit(1);
++	}
++
++	// Map our own uid/gid to themselves: files keep their real owner, nothing else is mapped.
++	if (writeProcFile("/proc/self/setgroups", "deny") != 0 && errno != ENOENT)
++	{
++		fprintf(stderr, "Cannot write /proc/self/setgroups: %s\n", strerror(errno));
++		exit(1);
++	}
++	snprintf(map, sizeof(map), "%u %u 1\n", (unsigned) g_originalUid, (unsigned) g_originalUid);
++	if (writeProcFile("/proc/self/uid_map", map) != 0)
++	{
++		fprintf(stderr, "Cannot write uid_map: %s\n", strerror(errno));
++		exit(1);
++	}
++	snprintf(map, sizeof(map), "%u %u 1\n", (unsigned) g_originalGid, (unsigned) g_originalGid);
++	if (writeProcFile("/proc/self/gid_map", map) != 0)
++	{
++		fprintf(stderr, "Cannot write gid_map: %s\n", strerror(errno));
++		exit(1);
++	}
++}
++
++static void joinServerUserNamespace(pid_t pidInit)
++{
++	char ours[64] = "", theirs[64] = "", path[64];
++
++	readlink("/proc/self/ns/user", ours, sizeof(ours) - 1);
++	snprintf(path, sizeof(path), "/proc/%d/ns/user", pidInit);
++	if (readlink(path, theirs, sizeof(theirs) - 1) <= 0)
++		return;
++	if (strcmp(ours, theirs) != 0)
++		joinNamespace(pidInit, CLONE_NEWUSER, "user");
++}
++
++static void raiseAmbientCaps(void)
++{
++	static const int caps[] = {
++		CAP_SYS_ADMIN, CAP_SETUID, CAP_SETGID, CAP_CHOWN, CAP_FOWNER,
++		CAP_DAC_OVERRIDE, CAP_DAC_READ_SEARCH, CAP_KILL, CAP_SYS_RESOURCE,
++	};
++	struct __user_cap_header_struct hdr = { _LINUX_CAPABILITY_VERSION_3, 0 };
++	struct __user_cap_data_struct data[2];
++
++	if (syscall(SYS_capget, &hdr, data) != 0)
++	{
++		fprintf(stderr, "capget failed: %s\n", strerror(errno));
++		exit(1);
++	}
++	data[0].inheritable = data[0].permitted;
++	data[1].inheritable = data[1].permitted;
++	if (syscall(SYS_capset, &hdr, data) != 0)
++	{
++		fprintf(stderr, "capset failed: %s\n", strerror(errno));
++		exit(1);
++	}
++	for (size_t i = 0; i < sizeof(caps) / sizeof(caps[0]); i++)
++	{
++		if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, caps[i], 0, 0) != 0)
++		{
++			fprintf(stderr, "Cannot raise ambient capability %d: %s\n", caps[i], strerror(errno));
++			exit(1);
++		}
++	}
++}
