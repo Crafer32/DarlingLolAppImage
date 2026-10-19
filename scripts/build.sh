@@ -7,7 +7,7 @@
 set -eu
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK=${WORK:-$REPO/work}
-DARLING_LOL_REF=${DARLING_LOL_REF:-32ed82e}
+DARLING_LOL_REF=${DARLING_LOL_REF:-bcb3245}
 JOBS=${JOBS:-$(nproc)}
 IMAGE=darling-lol-appimage-build:noble
 mkdir -p "$WORK" "$REPO/release"
@@ -39,5 +39,5 @@ run "VERSION=$VERSION sh /repo/scripts/build-appdir.sh"
 [ -f "$WORK/runtime-x86_64" ] || curl -sL -o "$WORK/runtime-x86_64" https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
 chmod +x "$WORK/appimagetool"
 ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$WORK/appimagetool" --runtime-file "$WORK/runtime-x86_64" --comp zstd \
-	"$WORK/AppDir" "$REPO/release/darling-lol-$VERSION-x86_64.AppImage"
-echo "Done: release/darling-lol-$VERSION-x86_64.AppImage"
+	"$WORK/AppDir" "$REPO/release/DarlingLol-$VERSION-x86_64.AppImage"
+echo "Done: release/DarlingLol-$VERSION-x86_64.AppImage"
