@@ -11,6 +11,12 @@ mkdir -p $A/usr/libexec; cp -a /usr/local/libexec/darling $A/usr/libexec/
 find $A/usr/libexec/darling -perm -4000 -exec chmod u-s {} + 2>/dev/null || true
 # Darling's userland ships man pages and vim; nothing in the game path uses them (~80 MB)
 rm -rf $A/usr/libexec/darling/usr/share/man $A/usr/libexec/darling/usr/share/vim
+# macOS's bundled Ruby 2.6 and Python 2.7 (~112 MB): nothing in the Riot Client or the game uses
+# them, and the launcher scripts run on the host's python3
+D=$A/usr/libexec/darling
+rm -rf $D/System/Library/Frameworks/Ruby.framework $D/System/Library/Frameworks/Python.framework \
+	$D/usr/lib/ruby $D/usr/lib/libruby*.dylib
+for b in erb gem irb rake rdoc ri ruby testrb python python2.7 python2.7-config python-config pydoc pydoc2.7; do rm -f $D/usr/bin/$b; done
 # Librerías del host de ABI variable, empaquetadas junto a mldr
 B=$A/usr/libexec/darling/usr/lib/host-bundle; mkdir -p $B
 LIBS="libjpeg.so.8 libgif.so.7 libtiff.so.6 libfuse.so.2"
