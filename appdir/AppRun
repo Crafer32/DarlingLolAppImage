@@ -12,6 +12,22 @@
 #   prefix/             the "Mac": Riot Client and the game
 #   cache/              Mesa shader cache
 set -eu
+# The AppImage runtime hands us an open descriptor on its FUSE mount (fd 1023). darlingserver
+# keeps running after we exit and would inherit it, so the AppImage never unmounts and the
+# launcher seems to hang. dash can't close fds above 9, so re-exec once with them closed.
+if [ -z "${DARLING_LOL_FDS_CLOSED:-}" ] && command -v python3 >/dev/null 2>&1; then
+	export DARLING_LOL_FDS_CLOSED=1
+	exec python3 -c '
+import os, sys
+mnt = os.environ.get("APPDIR") or os.path.dirname(os.path.realpath(sys.argv[1]))
+for fd in os.listdir("/proc/self/fd"):
+    try:
+        if int(fd) > 2 and os.readlink("/proc/self/fd/" + fd).startswith(mnt):
+            os.close(int(fd))  # only the mount descriptor; the pipe to the runtime must stay
+    except OSError:
+        pass
+os.execv("/bin/sh", ["/bin/sh"] + sys.argv[1:])' "$0" "$@"
+fi
 APPDIR=${APPDIR:-$(dirname "$(readlink -f "$0")")}
 VERSION=$(cat "$APPDIR/usr/share/darling-lol/VERSION")
 BASE=${DARLING_LOL_HOME:-$HOME/.darling-lol}
@@ -19,6 +35,10 @@ RT=$BASE/runtime/$VERSION
 export DPREFIX=${DPREFIX:-$BASE/prefix}
 export RCLOL_REGION=${RCLOL_REGION:-EUW}
 export MESA_SHADER_CACHE_DIR=${MESA_SHADER_CACHE_DIR:-$BASE/cache}
+# Close the League client UI while a match runs (darling-lol helper): otherwise the client that
+# comes back after the match is a second CEF instance whose window stays black. Set to 0 to keep
+# the in-client chat during matches.
+export RCLOL_CLOSE_CLIENT_IN_GAME=${RCLOL_CLOSE_CLIENT_IN_GAME:-1}
 
 say() { printf 'darling-lol: %s\n' "$*" >&2; }
 # Desktop notification that replaces the previous one, so long steps don't look frozen
@@ -71,9 +91,18 @@ if [ ! -f "$RT/.complete" ]; then
 	for old in "$BASE"/runtime/*; do [ "$old" = "$RT" ] || rm -rf "$old"; done
 fi
 
-export PATH="$RT/bin:$PATH"
+# `darling` wrapper: darlingserver outlives this launcher, and every descriptor it inherits from
+# the AppImage runtime (the mount, the runtime's pipe) keeps the AppImage mounted forever. Start
+# darling with only stdin/stdout/stderr.
+mkdir -p "$BASE/bin"
+cat > "$BASE/bin/darling" <<EOF
+#!/bin/sh
+exec python3 -c 'import os, sys; os.closerange(3, 65536); os.execv(sys.argv[1], sys.argv[1:])' "$RT/bin/darling" "\$@"
+EOF
+chmod +x "$BASE/bin/darling"
+export PATH="$BASE/bin:$RT/bin:$PATH"
 # run.sh puts /usr/local/bin first; this keeps our darling ahead of any system install
-export DARLING_RUNNER_DIR="$RT/bin"
+export DARLING_RUNNER_DIR="$BASE/bin"
 export DARLING_XSHM_HOST_LIBRARY="$RT/lib/darling-lol/libdarling-xshm.so"
 # Type 1 (X11 core) fonts crash the CEF renderer ("Preparing browse"): hide them.
 export FONTCONFIG_FILE="$RT/share/darling-lol/fonts.conf"
