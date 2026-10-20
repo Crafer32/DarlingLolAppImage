@@ -19,7 +19,9 @@ rm -rf $D/System/Library/Frameworks/Ruby.framework $D/System/Library/Frameworks/
 for b in erb gem irb rake rdoc ri ruby testrb python python2.7 python2.7-config python-config pydoc pydoc2.7; do rm -f $D/usr/bin/$b; done
 # Librerías del host de ABI variable, empaquetadas junto a mldr
 B=$A/usr/libexec/darling/usr/lib/host-bundle; mkdir -p $B
-LIBS="libjpeg.so.8 libgif.so.7 libtiff.so.6 libfuse.so.2"
+# libGLU: Darling's OpenGL framework loads it, and without it the Riot installer aborts at launch
+# (seen on a Void laptop with no glu package)
+LIBS="libjpeg.so.8 libgif.so.7 libtiff.so.6 libfuse.so.2 libGLU.so.1"
 # ffmpeg 6.1 built with decoders/demuxers only and no external libraries (scripts/build-ffmpeg.sh):
 # same sonames Darling expects, ~15 MB instead of ~160 MB of distro codecs
 FFMPEG=${FFMPEG:-/build/ffmpeg-min/lib}
