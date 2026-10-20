@@ -108,6 +108,9 @@ export DARLING_RUNNER_DIR="$BASE/bin"
 export DARLING_XSHM_HOST_LIBRARY="$RT/lib/darling-lol/libdarling-xshm.so"
 # Type 1 (X11 core) fonts crash the CEF renderer ("Preparing browse"): hide them.
 export FONTCONFIG_FILE="$RT/share/darling-lol/fonts.conf"
+export DARLING_LOL_MLDR="$RT/libexec/darling/usr/libexec/darling/mldr" DARLING_LOL_DARLING="$BASE/bin/darling"
+# a Darling left running by an earlier session (no Riot/League window open) breaks the new launch
+case "${1:-}" in --shutdown|--shell) ;; *) python3 "$RT/share/darling-lol/watch.py" stale ;; esac
 PROJECT=$BASE/project
 GUEST_USER=$(id -un)
 case "$GUEST_USER" in *[!A-Za-z0-9_-]*) die "User name '$GUEST_USER' must only use letters, digits, _ or -." ;; esac
@@ -164,8 +167,7 @@ fi
 start_watcher() {
 	pidfile=$BASE/watch.pid
 	if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then return; fi
-	DARLING_LOL_MLDR="$RT/libexec/darling/usr/libexec/darling/mldr" DARLING_LOL_DARLING="$BASE/bin/darling" \
-		setsid python3 -c 'import os, sys; os.closerange(3, 65536); os.execv(sys.executable, [sys.executable] + sys.argv[1:])' \
+	setsid python3 -c 'import os, sys; os.closerange(3, 65536); os.execv(sys.executable, [sys.executable] + sys.argv[1:])' \
 		"$RT/share/darling-lol/watch.py" </dev/null >>"$BASE/watch.log" 2>&1 &
 	echo $! > "$pidfile"
 }

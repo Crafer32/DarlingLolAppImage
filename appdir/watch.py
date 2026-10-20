@@ -7,7 +7,7 @@ windows never stops darlingserver. This watcher looks at the guest processes (ho
 whose executable is Darling's mldr) and, when none of the visible apps has been running for
 RCLOL_AUTO_SHUTDOWN_DELAY seconds, runs `darling shutdown` and then kills whatever is left.
 
-Disable with RCLOL_AUTO_SHUTDOWN=0.
+Disable with RCLOL_AUTO_SHUTDOWN=0. `watch.py stale` only stops a leftover session and exits.
 """
 import os
 import re
@@ -120,5 +120,13 @@ def main():
             return
 
 
+def stale():
+    """At launch: a Darling left over from an earlier session, with no Riot/League window, is
+    stopped first. Relaunching inside such a session makes the League client abort."""
+    if darlingserver_pids() and not any(VISIBLE.search(cmd) for _, cmd in guest_processes()):
+        log("stopping a Darling session left over from before")
+        shutdown()
+
+
 if __name__ == "__main__":
-    main()
+    stale() if sys.argv[1:] == ["stale"] else main()
