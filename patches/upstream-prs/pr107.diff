@@ -1,0 +1,225 @@
+diff --git a/docs/TROUBLESHOOTING.md b/docs/TROUBLESHOOTING.md
+index 54ec36b..15ffb7b 100644
+--- a/docs/TROUBLESHOOTING.md
++++ b/docs/TROUBLESHOOTING.md
+@@ -251,6 +251,27 @@ reference before callback delivery. This establishes the cancellation fix; a lon
+ Riot session still needs confirmation. With both clients and the game closed,
+ run `./scripts/update.sh` to install it, then `sh scripts/run.sh`.
+ 
++## League and Riot UIs crash after clicking Play
++
++The League UX processes and then the Riot Client renderer stop with `SIGTRAP`
++a few seconds after the lobby opens. The renderer prints
++`Check failed: kr == KERN_SUCCESS. mach_make_memory_entry_64: (os/kern) resource shortage (6)`
++from `platform_shared_memory_region_mac.cc`. darlingserver backs every named
++memory entry with a memfd, and its open descriptors peak at about 1100 when the
++lobby opens. Under the rootless NixOS launcher darlingserver cannot raise its
++hard `RLIMIT_NOFILE` to `nr_open`, so it used to keep the soft limit it
++inherited. When that limit was 1024 (several Electron apps and desktop launchers
++pass it on), `memfd_create` failed with `EMFILE`.
++
++darlingserver now raises its soft limit to the inherited hard limit when it
++cannot raise the hard one. A failed named-entry creation also logs
++`MEMDIAG … failed errno=… nofile=soft/hard` to `dserver.log`, and every 1024th
++memfd logs `MEMDIAG descriptors live=…` so a leak would show as a growing `live`
++count. With a 1024 soft limit the old server reproduced the crash and logged
++`errno=24 nofile=1024/524288`. With the fix, the server reports a 524288 soft
++limit under the same launch. To check a running server, read the `Max open files`
++line of `/proc/$(pgrep -x darlingserver)/limits`.
++
+ ## UI crashes after a button opens an external link
+ 
+ LaunchServices dereferenced a nullable error-output pointer in six paths. The patch checks the pointer itself and populates supplied outputs; the standalone regression covers missing handlers and null outputs. Electron opens LaunchServices through an absolute CoreServices subframework path, so the paired installer also replaces that binary in the stopped guest prefix. Updating only `RuntimeFrameworks/LaunchServices.framework` can leave the crash unfixed.
+diff --git a/patches/darlingserver.patch b/patches/darlingserver.patch
+index accf119..a2cc225 100644
+--- a/patches/darlingserver.patch
++++ b/patches/darlingserver.patch
+@@ -445,7 +445,7 @@ index 458e659..2e33f20 100644
+  			// wait until it's read
+  			if (!dtape_semaphore_down_simple(kqchan->waiter_read_semaphore)) {
+ diff --git a/duct-tape/src/memory.c b/duct-tape/src/memory.c
+-index 3114947..e2a8d5e 100644
++index 3114947..20cd162 100644
+ --- a/duct-tape/src/memory.c
+ +++ b/duct-tape/src/memory.c
+ @@ -11,6 +11,7 @@
+@@ -456,7 +456,55 @@ index 3114947..e2a8d5e 100644
+  #include <mach_debug/mach_debug.h>
+  
+  struct zone {
+-@@ -341,7 +342,14 @@ kern_return_t copyoutmap(vm_map_t map, void* fromdata, vm_map_address_t toaddr,
++@@ -52,6 +53,26 @@ int ftruncate(int fd, off_t length);
++ 
++ #define MFD_CLOEXEC 0x1
++ 
+++/* darling-lol diagnostics: why shared-memory creation fails. */
+++int* __errno_location(void);
+++struct dtape_diag_rlimit { unsigned long cur, max; };
+++int prlimit(int pid, int resource, const struct dtape_diag_rlimit* new_limit, struct dtape_diag_rlimit* old_limit);
+++#define DTAPE_DIAG_RLIMIT_NOFILE 7
+++
+++static long dtape_diag_live_descriptors;
+++static unsigned long dtape_diag_created_descriptors;
+++
+++static void dtape_diag_log_shortage(const char* what, int fd, uint64_t size) {
+++	int err = *__errno_location();
+++	struct dtape_diag_rlimit limit = {0, 0};
+++	prlimit(0, DTAPE_DIAG_RLIMIT_NOFILE, NULL, &limit);
+++	dtape_log_error("MEMDIAG %s failed errno=%d size=%#llx fd=%d live=%ld created=%lu nofile=%lu/%lu",
+++	    what, err, (unsigned long long)size, fd,
+++	    __atomic_load_n(&dtape_diag_live_descriptors, __ATOMIC_RELAXED),
+++	    __atomic_load_n(&dtape_diag_created_descriptors, __ATOMIC_RELAXED),
+++	    limit.cur, limit.max);
+++}
+++
++ void dtape_memory_init(void) {
++ 
++ };
++@@ -107,6 +128,12 @@ static dtape_map_shared_descriptor_t* dtape_map_shared_descriptor_create(int mem
++ 	desc->memfd = memfd;
++ 	desc->size = size;
++ 
+++	long live = __atomic_add_fetch(&dtape_diag_live_descriptors, 1, __ATOMIC_RELAXED);
+++	unsigned long created = __atomic_add_fetch(&dtape_diag_created_descriptors, 1, __ATOMIC_RELAXED);
+++	if (created % 1024 == 0) {
+++		dtape_log_error("MEMDIAG descriptors live=%ld created=%lu last_fd=%d", live, created, memfd);
+++	}
+++
++ 	return desc;
++ };
++ 
++@@ -121,6 +148,7 @@ static void dtape_map_shared_descriptor_release(dtape_map_shared_descriptor_t* d
++ 
++ 	close(desc->memfd);
++ 	free(desc);
+++	__atomic_sub_fetch(&dtape_diag_live_descriptors, 1, __ATOMIC_RELAXED);
++ };
++ 
++ static dtape_map_shared_entry_t* dtape_map_shared_entry_create(uint64_t address, uint64_t size, uint64_t page_offset, dtape_map_shared_descriptor_t* descriptor) {
++@@ -341,7 +369,14 @@ kern_return_t copyoutmap(vm_map_t map, void* fromdata, vm_map_address_t toaddr,
+  		memmove((void*)toaddr, fromdata, length);
+  		return KERN_SUCCESS;
+  	} else {
+@@ -472,7 +520,7 @@ index 3114947..e2a8d5e 100644
+  	}
+  };
+  
+-@@ -526,20 +534,212 @@ kern_return_t mach_vm_allocate_kernel(vm_map_t map, mach_vm_offset_t* addr, mach
++@@ -526,20 +561,218 @@ kern_return_t mach_vm_allocate_kernel(vm_map_t map, mach_vm_offset_t* addr, mach
+  	}
+  };
+  
+@@ -570,8 +618,13 @@ index 3114947..e2a8d5e 100644
+ +	dtape_map_shared_descriptor_t* desc = NULL;
+ +	if (permission & MAP_MEM_NAMED_CREATE) {
+ +		memfd = memfd_create("darling-mementry", MFD_CLOEXEC);
+-+		if (memfd < 0 || ftruncate(memfd, map_size) < 0) {
+-+			if (memfd >= 0) close(memfd);
+++		if (memfd < 0) {
+++			dtape_diag_log_shortage("named-create memfd_create", memfd, map_size);
+++			return KERN_RESOURCE_SHORTAGE;
+++		}
+++		if (ftruncate(memfd, map_size) < 0) {
+++			dtape_diag_log_shortage("named-create ftruncate", memfd, map_size);
+++			close(memfd);
+ +			return KERN_RESOURCE_SHORTAGE;
+ +		}
+ +	} else {
+@@ -627,6 +680,7 @@ index 3114947..e2a8d5e 100644
+ +
+ +	desc = dtape_map_shared_descriptor_create(memfd, map_size);
+ +	if (desc == NULL) {
+++		dtape_diag_log_shortage("named-entry descriptor malloc", memfd, map_size);
+ +		close(memfd);
+ +		return KERN_RESOURCE_SHORTAGE;
+ +	}
+@@ -689,7 +743,7 @@ index 3114947..e2a8d5e 100644
+  };
+  
+  kern_return_t mach_memory_info(host_priv_t host, mach_zone_name_array_t* namesp, mach_msg_type_number_t* namesCntp, mach_zone_info_array_t* infop, mach_msg_type_number_t* infoCntp, mach_memory_info_array_t* memoryInfop, mach_msg_type_number_t* memoryInfoCntp) {
+-@@ -591,8 +791,115 @@ kern_return_t mach_vm_machine_attribute(vm_map_t map, mach_vm_address_t addr, ma
++@@ -591,8 +824,115 @@ kern_return_t mach_vm_machine_attribute(vm_map_t map, mach_vm_address_t addr, ma
+  };
+  
+  kern_return_t mach_vm_map_external(vm_map_t target_map, mach_vm_offset_t* address, mach_vm_size_t initial_size, mach_vm_offset_t mask, int flags, ipc_port_t port, vm_object_offset_t offset, boolean_t copy, vm_prot_t cur_protection, vm_prot_t max_protection, vm_inherit_t inheritance) {
+@@ -807,7 +861,7 @@ index 3114947..e2a8d5e 100644
+  };
+  
+  kern_return_t mach_vm_msync(vm_map_t map, mach_vm_offset_t address, mach_vm_size_t size, vm_sync_t sync_flags) {
+-@@ -620,15 +927,22 @@ kern_return_t mach_vm_msync(vm_map_t map, mach_vm_offset_t address, mach_vm_size
++@@ -620,15 +960,22 @@ kern_return_t mach_vm_msync(vm_map_t map, mach_vm_offset_t address, mach_vm_size
+  };
+  
+  kern_return_t mach_vm_page_info(vm_map_t map, mach_vm_address_t address, vm_page_info_flavor_t flavor, vm_page_info_t info, mach_msg_type_number_t* count) {
+@@ -833,7 +887,7 @@ index 3114947..e2a8d5e 100644
+  };
+  
+  kern_return_t mach_vm_protect(vm_map_t map, mach_vm_offset_t start, mach_vm_size_t size, boolean_t set_maximum, vm_prot_t new_protection) {
+-@@ -756,7 +1070,8 @@ region_info_out:
++@@ -756,7 +1103,8 @@ region_info_out:
+  			return kr;
+  		};
+  		default:
+@@ -843,7 +897,7 @@ index 3114947..e2a8d5e 100644
+  	}
+  };
+  
+-@@ -856,7 +1171,7 @@ static kern_return_t mach_vm_remap_external_shared(vm_map_t target_map, mach_vm_
++@@ -856,7 +1204,7 @@ static kern_return_t mach_vm_remap_external_shared(vm_map_t target_map, mach_vm_
+  
+  	src_existing_entry_count = dtape_map_find_shared_entries_locked(src_map, start_memaddr, map_size, src_existing_entries, sizeof(src_existing_entries) / sizeof(*src_existing_entries));
+  
+@@ -852,7 +906,7 @@ index 3114947..e2a8d5e 100644
+  		// special case for what LLDB does with dyld info
+  		dtape_map_shared_descriptor_retain(src_existing_entries[0]->descriptor);
+  		descriptor = src_existing_entries[0]->descriptor;
+-@@ -1441,6 +1756,10 @@ mach_destroy_memory_entry(
++@@ -1441,6 +1789,10 @@ mach_destroy_memory_entry(
+  	named_entry->ref_count -= 1;
+  
+  	if (named_entry->ref_count == 0) {
+@@ -863,7 +917,7 @@ index 3114947..e2a8d5e 100644
+  		if (named_entry->is_sub_map) {
+  			vm_map_deallocate(named_entry->backing.map);
+  		} else if (named_entry->is_copy) {
+-@@ -1456,6 +1775,9 @@ mach_destroy_memory_entry(
++@@ -1456,6 +1808,9 @@ mach_destroy_memory_entry(
+  
+  		named_entry_unlock(named_entry);
+  		named_entry_lock_destroy(named_entry);
+@@ -1802,7 +1856,7 @@ index cc10f1d..7df0056 100644
+  		try {
+  			thread->processSignal(_body.bsd_signal_number, _body.linux_signal_number, _body.code, _body.signal_address, _body.thread_state, _body.float_state);
+ diff --git a/src/darlingserver.cpp b/src/darlingserver.cpp
+-index f79f057..2bf9cfb 100644
++index f79f057..54c42aa 100644
+ --- a/src/darlingserver.cpp
+ +++ b/src/darlingserver.cpp
+ @@ -497,6 +497,45 @@ static void handle_sigusr1(int signum) {
+@@ -1882,7 +1936,25 @@ index f79f057..2bf9cfb 100644
+  	if (argc < 6) {
+  		fprintf(stderr, "darlingserver is not meant to be started manually\n");
+  		exit(1);
+-@@ -745,6 +808,13 @@ int main(int argc, char** argv) {
++@@ -577,8 +640,15 @@ int main(int argc, char** argv) {
++ 
++ 		// now set our increased rlimit
++ 		if (setrlimit(RLIMIT_NOFILE, &increased_limit) != 0) {
++-			fprintf(stderr, "Warning: failed to increase FD rlimit: %s\n", strerror(errno));
++-			//exit(1);
+++			// darling-lol: a rootless user namespace cannot raise the hard limit.
+++			// Still raise the soft limit to it: every named memory entry holds a
+++			// memfd here, and Chromium's UX restart pushes past a 1024 soft limit,
+++			// failing memfd_create with EMFILE.
+++			increased_limit.rlim_cur = increased_limit.rlim_max = default_limit.rlim_max;
+++			if (setrlimit(RLIMIT_NOFILE, &increased_limit) != 0) {
+++				fprintf(stderr, "Warning: failed to increase FD rlimit: %s\n", strerror(errno));
+++				//exit(1);
+++			}
++ 		}
++ 
++ #endif
++@@ -745,6 +815,13 @@ int main(int argc, char** argv) {
+  #endif
+  
+  	// create the server

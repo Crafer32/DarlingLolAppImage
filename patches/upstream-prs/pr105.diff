@@ -1,0 +1,26 @@
+diff --git a/patches/security.patch b/patches/security.patch
+index d12af04..c975769 100644
+--- a/patches/security.patch
++++ b/patches/security.patch
+@@ -205,6 +205,21 @@ index 06c5d4aa..9f24ea91 100644
+      if (context.numTasks >= MAX_TASKS) {
+          secnotice("http", "Too many fetch %@ requests for this cert", [self class]);
+          return true;
++diff --git a/trust/trustd/macOS/com.apple.trustd.plist b/trust/trustd/macOS/com.apple.trustd.plist
++index b3780e3c..71e089a4 100644
++--- a/trust/trustd/macOS/com.apple.trustd.plist
+++++ b/trust/trustd/macOS/com.apple.trustd.plist
++@@ -2,7 +2,9 @@
++ <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++ <plist version="1.0">
++ <dict>
++-	<key>EnablePressuredExit</key>
+++	<key>KeepAlive</key>
+++	<true/>
+++	<key>RunAtLoad</key>
++ 	<true/>
++ 	<key>EnableTransactions</key>
++ 	<true/>
+ diff --git a/trust/trustd/trustdFileHelper/main.m b/trust/trustd/trustdFileHelper/main.m
+ index f6d166e2..fb7ae819 100644
+ --- a/trust/trustd/trustdFileHelper/main.m

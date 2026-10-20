@@ -21,6 +21,12 @@ if [ "${STEP:-all}" = all ]; then
 	[ -d "$WORK/darling-lol" ] || git clone https://github.com/lucannez64/darling-lol.git "$WORK/darling-lol"
 	git -C "$WORK/darling-lol" checkout -q "$DARLING_LOL_REF"
 	git -C "$WORK/darling-lol" apply "$REPO/patches/darling-lol-tools-appimage.patch"
+	# Optional: open upstream pull requests to try before they are merged, e.g.
+	#   UPSTREAM_PRS="90 103 105 107" scripts/build.sh   (diffs in patches/upstream-prs/)
+	for pr in ${UPSTREAM_PRS:-}; do
+		git -C "$WORK/darling-lol" apply "$REPO/patches/upstream-prs/pr$pr.diff"
+		echo "applied upstream PR #$pr"
+	done
 	run 'git lfs install --skip-repo >/dev/null; python3 scripts/configure.py --guest-user lol --prefix /build/prefix && python3 scripts/prepare.py'
 	run 'sh /repo/scripts/build-ffmpeg.sh'
 	patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-rootless.patch"

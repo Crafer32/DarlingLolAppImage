@@ -21,6 +21,17 @@ affiliated with Riot Games.
 Options: `--installer` (reinstall the Riot Client, region from `RCLOL_REGION`, default EUW),
 `--shell` (a shell inside Darling), `--shutdown` (stop Darling).
 
+Darling stops by itself about 90 seconds after the Riot Client and League are closed (the Riot
+Client leaves background agents running, so without this it would keep going). Settings:
+
+| Variable | Default | What |
+|---|---|---|
+| `RCLOL_REGION` | `EUW` | region for the Riot Client installer |
+| `RCLOL_AUTO_SHUTDOWN` | `1` | `0` keeps Darling running after closing everything |
+| `RCLOL_AUTO_SHUTDOWN_DELAY` | `90` | seconds to wait before stopping Darling |
+| `RCLOL_CLOSE_CLIENT_IN_GAME` | `1` | `0` keeps the League client open during matches (in-client chat) |
+| `DARLING_LOL_HOME` | `~/.darling-lol` | where everything is stored |
+
 Everything goes into one folder, `~/.darling-lol`. If something breaks, or you just want to try
 it and leave no trace, delete that folder and you're back to a clean state:
 
@@ -51,6 +62,15 @@ the new variables, so a classic install isn't affected.
 | **libc** | glibc 2.39+ |
 | **Session** | X11 or XWayland |
 | **Needs** | `python3` |
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| The login asks for a captcha that never appears | Sign in with the QR code (Riot Mobile app) |
+| The League client closes as soon as it opens, or a second launch does nothing | `./DarlingLol-*.AppImage --shutdown`, then open it again |
+| Darling is still running after closing everything | Wait ~90 s, or `--shutdown`. The watcher's log is `~/.darling-lol/watch.log` |
+| Anything else | Delete `~/.darling-lol/runtime` (it's unpacked again on the next launch; the game is kept) |
 
 ## Reusing an existing darling-lol install
 
