@@ -59,4 +59,5 @@ chmod +x "$WORK/appimagetool"
 ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$WORK/appimagetool" --runtime-file "$WORK/runtime-x86_64" --comp zstd \
 	--mksquashfs-opt -Xcompression-level --mksquashfs-opt 19 --mksquashfs-opt -b --mksquashfs-opt 1M \
 	"$WORK/AppDir" "$REPO/release/DarlingLol-$VERSION-x86_64.AppImage"
+python3 "$REPO/scripts/check-appimage.py" "$REPO/release/DarlingLol-$VERSION-x86_64.AppImage"
 echo "Done: release/DarlingLol-$VERSION-x86_64.AppImage"
