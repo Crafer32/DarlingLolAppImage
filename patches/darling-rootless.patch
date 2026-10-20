@@ -134,19 +134,6 @@ diff --color -ru orig/src/external/darlingserver/src/darlingserver.cpp new/src/e
  
  	// temporarily drop privileges to perform some prefix work
  	temp_drop_privileges(originalUID, originalGID);
-@@ -640,8 +673,10 @@
- 
- 		// now set our increased rlimit
- 		if (setrlimit(RLIMIT_NOFILE, &increased_limit) != 0) {
--			fprintf(stderr, "Warning: failed to increase FD rlimit: %s\n", strerror(errno));
--			//exit(1);
-+			// rootless: the hard limit can't be raised from a user namespace; use what we have
-+			increased_limit.rlim_cur = increased_limit.rlim_max = default_limit.rlim_max;
-+			if (setrlimit(RLIMIT_NOFILE, &increased_limit) != 0)
-+				fprintf(stderr, "Warning: failed to increase FD rlimit: %s\n", strerror(errno));
- 		}
- 
- #endif
 @@ -689,36 +724,41 @@
  			exit(1);
  		}

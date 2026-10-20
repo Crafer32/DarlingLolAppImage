@@ -1,0 +1,15 @@
+--- a/src/external/darlingserver/src/darlingserver.cpp	2026-10-18 21:22:37.857254234 +0200
++++ b/src/external/darlingserver/src/darlingserver.cpp	2026-10-19 01:46:01.145604559 +0200
+@@ -640,8 +673,10 @@
+ 
+ 		// now set our increased rlimit
+ 		if (setrlimit(RLIMIT_NOFILE, &increased_limit) != 0) {
+-			fprintf(stderr, "Warning: failed to increase FD rlimit: %s\n", strerror(errno));
+-			//exit(1);
++			// rootless: the hard limit can't be raised from a user namespace; use what we have
++			increased_limit.rlim_cur = increased_limit.rlim_max = default_limit.rlim_max;
++			if (setrlimit(RLIMIT_NOFILE, &increased_limit) != 0)
++				fprintf(stderr, "Warning: failed to increase FD rlimit: %s\n", strerror(errno));
+ 		}
+ 
+ #endif

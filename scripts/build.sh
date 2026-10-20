@@ -30,6 +30,10 @@ if [ "${STEP:-all}" = all ]; then
 	run 'git lfs install --skip-repo >/dev/null; python3 scripts/configure.py --guest-user lol --prefix /build/prefix && python3 scripts/prepare.py'
 	run 'sh /repo/scripts/build-ffmpeg.sh'
 	patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-rootless.patch"
+	# soft FD limit fallback; darling-lol PR #107 makes the same change, so skip it when that's in
+	if patch -d "$WORK/darling-lol/build/darling-src" -p1 --dry-run -s -f < "$REPO/patches/darling-rootless-fdlimit.patch" >/dev/null; then
+		patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-rootless-fdlimit.patch"
+	fi
 	# darling-lol >= 6505ecf drags client-drawn windows natively (#87); keep ours only for older refs
 	if patch -d "$WORK/darling-lol/build/darling-src" -p1 --dry-run -s -f < "$REPO/patches/darling-window-drag.patch" >/dev/null; then
 		patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-window-drag.patch"
