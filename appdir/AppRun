@@ -68,6 +68,10 @@ g=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
 vge "${g:-0}" 2.39 || die "glibc ${g:-not found}: needs glibc 2.39 or newer."
 command -v python3 >/dev/null 2>&1 || die "python3 is missing. Install it with your package manager and try again."
 [ -n "${DISPLAY:-}" ] || die "No X11 display. Use an X11 session or Wayland with XWayland."
+# darlingserver's socket is $DPREFIX/.darlingserver.sock and a Unix socket path holds 107 bytes;
+# a longer one fails later with an obscure "socket path is too long" and a hung launch
+[ "$(printf %s "$DPREFIX/.darlingserver.sock" | wc -c)" -le 107 ] ||
+	die "The prefix path is too long for Darling's socket: $DPREFIX. Set DARLING_LOL_HOME or DPREFIX to a shorter folder."
 
 # ---- 2. Older layout (r1-r3: runtime in ~/.local/share, prefix in ~/.darling-lol) -------
 if [ -z "${DARLING_LOL_HOME:-}" ] && [ -d "$BASE/Applications" ] && [ ! -d "$BASE/prefix" ]; then
