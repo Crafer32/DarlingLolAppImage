@@ -21,6 +21,10 @@ affiliated with Riot Games.
 Options: `--installer` (reinstall the Riot Client, region from `RCLOL_REGION`, default EUW),
 `--shell` (a shell inside Darling), `--shutdown` (stop Darling).
 
+Once you're signed in to the Riot Client (tick "Stay signed in"), League opens by itself, the same
+request the Play button sends. While League runs, the Riot Client window is minimized and kept off
+the taskbar; it comes back when League closes.
+
 Darling stops by itself about 90 seconds after the Riot Client and League are closed (the Riot
 Client leaves background agents running, so without this it would keep going). Settings:
 
@@ -29,6 +33,8 @@ Client leaves background agents running, so without this it would keep going). S
 | `RCLOL_REGION` | `EUW` | region for the Riot Client installer |
 | `RCLOL_AUTO_SHUTDOWN` | `1` | `0` keeps Darling running after closing everything |
 | `RCLOL_AUTO_SHUTDOWN_DELAY` | `90` | seconds to wait before stopping Darling |
+| `RCLOL_AUTOPLAY` | `1` | `0` waits for you to press Play |
+| `RCLOL_HIDE_RIOT_CLIENT` | `1` | `0` leaves the Riot Client window on the taskbar while League runs |
 | `RCLOL_CLOSE_CLIENT_IN_GAME` | `1` | `0` keeps the League client open during matches (in-client chat) |
 | `DARLING_LOL_HOME` | `~/.darling-lol` | where everything is stored |
 | `DARLING_LOL_NO_DESKTOP` | unset | `1` skips the applications menu entry the AppImage adds for itself |

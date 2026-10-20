@@ -46,6 +46,7 @@ rm -rf $A/usr/share/darling-lol/project/scripts/__pycache__
 cp /repo/appdir/fonts.conf $A/usr/share/darling-lol/
 mkdir -p $A/usr/share/darling-lol/fonts && cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf $A/usr/share/darling-lol/fonts/
 install -m755 /repo/appdir/watch.py $A/usr/share/darling-lol/watch.py
+install -m755 /repo/appdir/autoplay.py $A/usr/share/darling-lol/autoplay.py
 echo "$V" > $A/usr/share/darling-lol/VERSION
 # Build ID: two builds of the same version get different runtime folders, so testing a rebuild
 # never reuses a stale unpacked runtime

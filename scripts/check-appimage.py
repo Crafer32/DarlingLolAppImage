@@ -6,7 +6,7 @@
 - every library in host-bundle finds its dependencies (in the bundle or as a base system library
   every distro has);
 - libLLVM exports every LLVM C API function libiridium uses (the minimal LLVM must not lose any);
-- the launcher pieces are there (VERSION, BUILD, watch.py, fonts, fonts.conf).
+- the launcher pieces are there (VERSION, BUILD, watch.py, autoplay.py, fonts, fonts.conf).
 Needs binutils (readelf, nm) and strings.
 """
 import os
@@ -48,7 +48,7 @@ def main(appimage):
         bundle = os.path.join(root, "usr/libexec/darling/usr/lib/host-bundle")
 
         # launcher pieces
-        for f in ["VERSION", "BUILD", "watch.py", "fonts.conf", "fonts/DejaVuSans.ttf", "guest-runtime.tar.gz", "system_profiler"]:
+        for f in ["VERSION", "BUILD", "watch.py", "autoplay.py", "fonts.conf", "fonts/DejaVuSans.ttf", "guest-runtime.tar.gz", "system_profiler"]:
             (ok if os.path.exists(os.path.join(share, f)) else fail)(f"usr/share/darling-lol/{f}")
         version = open(os.path.join(share, "VERSION")).read().strip()
         print(f"     version {version}, build {open(os.path.join(share, 'BUILD')).read().strip() if os.path.exists(os.path.join(share, 'BUILD')) else '?'}")

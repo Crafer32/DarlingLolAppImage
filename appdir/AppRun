@@ -204,5 +204,12 @@ start_watcher() {
 	echo $! > "$pidfile"
 }
 start_watcher
+# Press Play for the user once the Riot Client is signed in, and keep the Riot Client off the
+# taskbar while League runs (RCLOL_AUTOPLAY=0 / RCLOL_HIDE_RIOT_CLIENT=0 turn these off).
+if ! { [ -f "$BASE/autoplay.pid" ] && kill -0 "$(cat "$BASE/autoplay.pid")" 2>/dev/null; }; then
+	setsid python3 -c 'import os, sys; os.closerange(3, 65536); os.execv(sys.executable, [sys.executable] + sys.argv[1:])' \
+		"$RT/share/darling-lol/autoplay.py" </dev/null >"$BASE/autoplay.log" 2>&1 &
+	echo $! > "$BASE/autoplay.pid"
+fi
 note "Starting the Riot Client... (the first window can take up to a minute)"
 exec sh scripts/run.sh
