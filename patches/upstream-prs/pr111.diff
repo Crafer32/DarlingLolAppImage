@@ -1,0 +1,277 @@
+diff --git a/docs/TROUBLESHOOTING.md b/docs/TROUBLESHOOTING.md
+index 15ffb7b..13a2f7b 100644
+--- a/docs/TROUBLESHOOTING.md
++++ b/docs/TROUBLESHOOTING.md
+@@ -376,7 +376,7 @@ It prints each thread-local access that calls its thunk without the descriptor i
+ 
+ ## Base install refuses to continue while Darling is not running
+ 
+-`sudo cmake --install` prints `Darling currently running for <user>, shutting it down...` several times and then `Darling launchd PID … remains alive after shutdown`. A guest launchd outlived its darlingserver, so `darling shutdown` sees no container to stop. `python3 build/runtime/tools/ensure-darling-runtime.py` stops such a launchd (your own, only when no darlingserver runs); `scripts/run.sh` and `scripts/install-runtime.sh` run it too.
++`sudo cmake --install` prints `Darling currently running for <user>, shutting it down...` several times and then `Darling launchd PID … remains alive after shutdown`. A guest launchd outlived its darlingserver, so `darling shutdown` sees no container to stop. Automatic cleanup by process name is disabled because guest names and UIDs do not prove prefix ownership (killing by name risks terminating an active launchd from an unrelated prefix or session). If setup is blocked, shut down the original Darling session from its own namespace (`darling shutdown`), or inspect the leftover PID under `/proc/<PID>` before terminating it manually.
+ 
+ ## Lower fight FPS than Windows
+ 
+diff --git a/tests/test_runtime_cleanup_scope.py b/tests/test_runtime_cleanup_scope.py
+new file mode 100644
+index 0000000..afc76f8
+--- /dev/null
++++ b/tests/test_runtime_cleanup_scope.py
+@@ -0,0 +1,151 @@
++"""Cleanup scope regressions: fake proc/prefix trees and mocked signals only."""
++import contextlib
++import importlib.util
++import io
++import os
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import MagicMock, Mock, patch
++
++
++SCRIPT = Path(__file__).resolve().parents[1] / 'tools/ensure-darling-runtime.py'
++
++
++class RuntimeCleanupScopeTests(unittest.TestCase):
++    def setUp(self):
++        temporary = tempfile.TemporaryDirectory(prefix='cleanup-scope-')
++        self.addCleanup(temporary.cleanup)
++        self.root = Path(temporary.name)
++        self.proc = self.root / 'proc'
++        self.proc.mkdir()
++        self.prefix = self.root / 'selected prefix'
++        self.other = self.root / 'unrelated prefix'
++        self.shm = self.root / 'shm'
++        for folder in (self.prefix / 'private/tmp', self.other / 'private/tmp', self.shm):
++            folder.mkdir(parents=True)
++        # Guard signals before import; no real process may ever be signalled.
++        self.kill = self.enterContext(patch('os.kill'))
++        spec = importlib.util.spec_from_file_location('cleanup_scope', SCRIPT)
++        assert spec is not None and spec.loader is not None
++        self.cleanup = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(self.cleanup)
++        self.stderr = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
++        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
++        self.enterContext(patch.dict(os.environ, {'DPREFIX': str(self.prefix)}))
++        self.enterContext(patch.object(self.cleanup, 'Path', side_effect=self.fake_path))
++        # Its default Path('/proc') is bound at definition time, before patching Path.
++        running = self.cleanup.any_server_running
++        self.enterContext(patch.object(self.cleanup, 'any_server_running',
++                                     side_effect=lambda proc_root=None: running(
++                                         self.proc if proc_root is None else proc_root)))
++
++    def fake_path(self, value):
++        # Never inspect host /proc or remove host shared-memory files.
++        return {'/proc': self.proc, '/dev/shm': self.shm}.get(str(value), Path(value))
++
++    def process(self, pid, *, comm='launchd', argv=('/sbin/launchd',), state='S'):
++        folder = self.proc / str(pid)
++        folder.mkdir()
++        (folder / 'comm').write_text(comm + '\n')
++        (folder / 'cmdline').write_bytes(b'\0'.join(arg.encode() for arg in argv) + b'\0')
++        (folder / 'status').write_text(f'State:\t{state} (fixture)\n')
++        return folder
++
++    def test_direct_cleanup_entry_points_preserve_ambiguous_processes(self):
++        self.process(101)
++        self.process(102, comm='chrome_crashpad', argv=(
++            '/Applications/Riot Client.app/Contents/Frameworks/chrome_crashpad_handler',))
++        self.cleanup.stop_orphaned_launchd(self.proc)
++        self.cleanup.stop_riot_crashpad(self.proc)
++        self.kill.assert_not_called()
++        self.assertIn('prefix ownership', self.stderr.getvalue())
++        self.assertIn('launchd candidate PIDs 101', self.stderr.getvalue())
++        self.assertIn('Riot crashpad candidate PIDs 102', self.stderr.getvalue())
++
++    def test_clean_start_is_silent(self):
++        self.cleanup.main()
++        self.assertEqual(self.stderr.getvalue(), '')
++        self.kill.assert_not_called()
++
++    def test_unrelated_processes_are_silent(self):
++        self.process(110, comm='chrome_crashpad', argv=(
++            '/opt/google/chrome/chrome_crashpad_handler', '--annotation=riot'))
++        self.process(111, comm='unrelated', argv=('/usr/bin/tool', '/sbin/launchd'))
++        self.process(112, comm='unrelated', argv=('/usr/bin/tool',
++            '/Applications/Riot Client.app/chrome_crashpad_handler'))
++        self.cleanup.main()
++        self.assertEqual(self.stderr.getvalue(), '')
++        self.kill.assert_not_called()
++
++    def test_foreign_owned_candidates_are_silent(self):
++        self.process(113)
++        self.process(114, comm='chrome_crashpad', argv=(
++            '/Applications/Riot Client.app/chrome_crashpad_handler',))
++        with patch.object(Path, 'stat', return_value=Mock(st_uid=os.getuid() + 1)):
++            self.cleanup.stop_orphaned_launchd(self.proc)
++            self.cleanup.stop_riot_crashpad(self.proc)
++        self.assertEqual(self.stderr.getvalue(), '')
++        self.kill.assert_not_called()
++
++    def test_main_preserves_processes_from_another_prefix_without_a_server(self):
++        self.process(101)
++        self.process(102, comm='chrome_crashpad', argv=(
++            str(self.other / 'Applications/Riot Client.app/crashpad_handler'),))
++        selected = self.prefix / 'private/tmp/.com.riotgames.selected'
++        selected.write_text('stale')
++        unrelated = self.other / 'private/tmp/.com.riotgames.other'
++        unrelated.write_text('preserve')
++        shared = self.shm / 'darling-buffer-fixture'
++        shared.write_text('stale')
++        self.cleanup.main()
++        self.kill.assert_not_called()
++        self.assertFalse(selected.exists())
++        self.assertFalse(shared.exists())
++        self.assertEqual(unrelated.read_text(), 'preserve')
++
++    def test_any_live_server_preserves_locks_and_shared_buffers(self):
++        self.process(103, comm='darlingserver', argv=('darlingserver',))
++        lock = self.prefix / 'private/tmp/.com.riotgames.lock'
++        lock.write_text('active')
++        shared = self.shm / 'darling-buffer-fixture'
++        shared.write_text('active')
++        self.cleanup.main()
++        self.kill.assert_not_called()
++        self.assertTrue(lock.exists())
++        self.assertTrue(shared.exists())
++
++    def test_unreadable_process_list_fails_closed(self):
++        hidden = MagicMock()
++        hidden.name = '104'
++        (hidden / 'comm').read_text.side_effect = PermissionError('hidden')
++        proc = Mock()
++        proc.iterdir.return_value = [hidden]
++        self.assertTrue(self.cleanup.any_server_running(proc))
++        self.kill.assert_not_called()
++
++    def test_dead_marker_is_recovered_only_in_the_selected_prefix(self):
++        self.process(105, state='Z')
++        marker = self.prefix / '.init.pid'
++        marker.write_text('105')
++        other = self.other / '.init.pid'
++        other.write_text('105')
++        self.cleanup.main()
++        self.assertFalse(marker.exists())
++        recovered = list(self.prefix.glob('.init.pid.stale-105-*'))
++        self.assertEqual(len(recovered), 1)
++        self.assertEqual(recovered[0].read_text(), '105')
++        self.assertEqual(other.read_text(), '105')
++        self.kill.assert_not_called()
++
++    def test_live_marker_is_not_replaced(self):
++        self.process(106)
++        marker = self.prefix / '.init.pid'
++        marker.write_text('106')
++        self.cleanup.main()
++        self.assertEqual(marker.read_text(), '106')
++        self.kill.assert_not_called()
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tools/ensure-darling-runtime.py b/tools/ensure-darling-runtime.py
+index 5e131b4..391c13b 100644
+--- a/tools/ensure-darling-runtime.py
++++ b/tools/ensure-darling-runtime.py
+@@ -2,7 +2,7 @@
+ """Clear a dead Darling server's stale PID marker, and stale shared buffers once no server runs."""
+ import os
+ from pathlib import Path
+-import signal
++import sys
+ import time
+ def recover_marker(prefix):
+     marker = prefix / '.init.pid'
+@@ -38,39 +38,46 @@ def any_server_running(proc_root=Path('/proc')):
+             pass
+     return False
+ 
+-def stop_orphaned_launchd(proc_root=Path('/proc')):
+-    """A guest launchd that outlived its darlingserver cannot be shut down with `darling shutdown`
+-    and makes the base install (tools/shutdown-user.sh) refuse to continue."""
++def _matching_pids(kind, proc_root):
++    """Find same-user candidates by guest executable; this does not establish ownership."""
+     uid = os.getuid()
+     for proc in proc_root.iterdir():
+         if not proc.name.isdigit():
+             continue
+         try:
+-            if proc.stat().st_uid != uid or (proc / 'cmdline').read_bytes().rstrip(b'\0') != b'/sbin/launchd':
++            if proc.stat().st_uid != uid:
+                 continue
+-            os.kill(int(proc.name), signal.SIGKILL)
+-            print(f'Stopped orphaned Darling launchd PID {proc.name}', flush=True)
++            argv = (proc / 'cmdline').read_bytes()
++            if kind == 'launchd':
++                matches = argv.rstrip(b'\0') == b'/sbin/launchd'
++            else:
++                executable = argv.split(b'\0', 1)[0].decode(errors='replace')
++                matches = (proc / 'comm').read_text().startswith('chrome_crashpad') and any(
++                    bundle in executable for bundle in (
++                        '/Riot Client.app/', '/League of Legends.app/',
++                        '/League of Legends (TM) Client.app/'))
++            if matches:
++                yield proc.name
+         except (OSError, ValueError):
+-            pass
++            continue
++
++
++def stop_orphaned_launchd(proc_root=Path('/proc')):
++    """Warn about launchd candidates without assuming prefix ownership or signalling them."""
++    pids = list(_matching_pids('launchd', proc_root))
++    if pids:
++        print(f'Preserving launchd candidate PIDs {", ".join(pids)}: prefix ownership '
++              'cannot be proved. If setup is blocked, shut down the original Darling '
++              'session or inspect the leftover processes manually.', file=sys.stderr, flush=True)
++
+ 
+ def stop_riot_crashpad(proc_root=Path('/proc')):
+-    """A Riot crash handler outliving its server holds the old session's ports; spare every other app's."""
+-    uid = os.getuid()
+-    for proc in proc_root.iterdir():
+-        if not proc.name.isdigit():
+-            continue
+-        try:
+-            if not (proc / 'comm').read_text().startswith('chrome_crashpad') or proc.stat().st_uid != uid:
+-                continue
+-            argv = (proc / 'cmdline').read_bytes().split(b'\0')
+-            executable = argv[0].decode(errors='replace')
+-            # Match the executable's bundle, not arbitrary arguments (a browser may mention Riot).
+-            if any(bundle in executable for bundle in (
+-                '/Riot Client.app/', '/League of Legends.app/', '/League of Legends (TM) Client.app/'
+-            )):
+-                os.kill(int(proc.name), signal.SIGTERM)
+-        except (OSError, ValueError):
+-            pass
++    """Warn about Riot crashpad candidates without assuming prefix ownership or signalling them."""
++    pids = list(_matching_pids('crashpad', proc_root))
++    if pids:
++        print(f'Preserving Riot crashpad candidate PIDs {", ".join(pids)}: prefix ownership '
++              'cannot be proved. Use the original session to shut down leftover helpers.',
++              file=sys.stderr, flush=True)
+ 
+ def remove_owned(paths):
+     uid = os.getuid()
+diff --git a/tools/riot-runtime-cleanup-offline-check.py b/tools/riot-runtime-cleanup-offline-check.py
+index f9bc9fa..5d5eac4 100644
+--- a/tools/riot-runtime-cleanup-offline-check.py
++++ b/tools/riot-runtime-cleanup-offline-check.py
+@@ -25,10 +25,9 @@ def process(pid, comm, argv):
+     process(104, 'unrelated', ['/usr/bin/unrelated', '/sbin/launchd'])
+     with patch.object(cleanup.os, 'kill') as kill:
+         cleanup.stop_riot_crashpad(root)
+-        assert kill.call_args_list == [((102, cleanup.signal.SIGTERM),)]
+-        kill.reset_mock()
++        kill.assert_not_called()
+         cleanup.stop_orphaned_launchd(root)
+-        assert kill.call_args_list == [((103, cleanup.signal.SIGKILL),)]
++        kill.assert_not_called()
+     assert not cleanup.any_server_running(root)
+     process(105, 'darlingserver', ['darlingserver', '--prefix=another-prefix'])
+     assert cleanup.any_server_running(root)
+@@ -58,4 +57,4 @@ def process(pid, comm, argv):
+         crashpad.assert_not_called()
+         orphan.assert_not_called()
+         remove.assert_not_called()
+-print('RUNTIME_CLEANUP_OFFLINE pass=1 browser_preserved=1 other_prefix_preserved=1 foreign_owner_preserved=1 hidden_process_preserved=1 orphan_recovered=1')
++print('RUNTIME_CLEANUP_OFFLINE pass=1 browser_preserved=1 other_prefix_preserved=1 foreign_owner_preserved=1 hidden_process_preserved=1 orphan_preserved=1')

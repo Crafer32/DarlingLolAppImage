@@ -7,7 +7,9 @@
 set -eu
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK=${WORK:-$REPO/work}
-DARLING_LOL_REF=${DARLING_LOL_REF:-6505ecf}
+DARLING_LOL_REF=${DARLING_LOL_REF:-bbfa4c6}
+# open upstream pull requests applied on top (diffs in patches/upstream-prs/); #105 and #107 are merged
+UPSTREAM_PRS=${UPSTREAM_PRS-90 103 111 60-launcher}
 JOBS=${JOBS:-$(nproc)}
 IMAGE=darling-lol-appimage-build:noble
 mkdir -p "$WORK" "$REPO/release"
@@ -21,9 +23,7 @@ if [ "${STEP:-all}" = all ]; then
 	[ -d "$WORK/darling-lol" ] || git clone https://github.com/lucannez64/darling-lol.git "$WORK/darling-lol"
 	git -C "$WORK/darling-lol" checkout -q "$DARLING_LOL_REF"
 	git -C "$WORK/darling-lol" apply "$REPO/patches/darling-lol-tools-appimage.patch"
-	# Optional: open upstream pull requests to try before they are merged, e.g.
-	#   UPSTREAM_PRS="90 103 105 107" scripts/build.sh   (diffs in patches/upstream-prs/)
-	for pr in ${UPSTREAM_PRS:-}; do
+	for pr in $UPSTREAM_PRS; do
 		git -C "$WORK/darling-lol" apply "$REPO/patches/upstream-prs/pr$pr.diff"
 		echo "applied upstream PR #$pr"
 	done
@@ -56,8 +56,11 @@ run "VERSION=$VERSION sh /repo/scripts/build-appdir.sh"
 [ -f "$WORK/runtime-x86_64" ] || curl -sL -o "$WORK/runtime-x86_64" https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
 chmod +x "$WORK/appimagetool"
 # zstd level 19 with 1 MiB blocks: ~9% smaller than the defaults (172 -> 156 MB on 1.1)
-ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$WORK/appimagetool" --runtime-file "$WORK/runtime-x86_64" --comp zstd \
+# update information for AppImageUpdate / Gear Lever: the .zsync next to each GitHub release asset
+UPDATE_INFO=${UPDATE_INFO-"gh-releases-zsync|Crafer32|DarlingLolAppImage|latest|DarlingLol-*x86_64.AppImage.zsync"}
+(cd "$REPO/release" && ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$WORK/appimagetool" --runtime-file "$WORK/runtime-x86_64" --comp zstd \
+	${UPDATE_INFO:+-u "$UPDATE_INFO"} \
 	--mksquashfs-opt -Xcompression-level --mksquashfs-opt 19 --mksquashfs-opt -b --mksquashfs-opt 1M \
-	"$WORK/AppDir" "$REPO/release/DarlingLol-$VERSION-x86_64.AppImage"
+	"$WORK/AppDir" "$REPO/release/DarlingLol-$VERSION-x86_64.AppImage")
 python3 "$REPO/scripts/check-appimage.py" "$REPO/release/DarlingLol-$VERSION-x86_64.AppImage"
 echo "Done: release/DarlingLol-$VERSION-x86_64.AppImage"

@@ -43,6 +43,8 @@ export MESA_SHADER_CACHE_DIR=${MESA_SHADER_CACHE_DIR:-$BASE/cache}
 export RCLOL_CLOSE_CLIENT_IN_GAME=${RCLOL_CLOSE_CLIENT_IN_GAME:-1}
 
 say() { printf 'darling-lol: %s\n' "$*" >&2; }
+# Time of each launch step in $BASE/launch.log (the Riot/League side is in autoplay.log)
+lap() { printf '%s %s\n' "$(date +%T.%3N)" "$*" >> "$BASE/launch.log" 2>/dev/null || true; }
 # Desktop notification that replaces the previous one, so long steps don't look frozen
 NOTIFY_ID=
 note() {
@@ -60,6 +62,9 @@ die() {
 	exit 1
 }
 vge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
+
+mkdir -p "$BASE" && : > "$BASE/launch.log"
+lap "start ${1:-launch}"
 
 # ---- 1. Basic checks (clear errors instead of strange failures later) -----------------
 k=$(uname -r | sed 's/[^0-9.].*//')
@@ -148,6 +153,7 @@ GUEST_USER=$(id -un)
 case "$GUEST_USER" in *[!A-Za-z0-9_-]*) die "User name '$GUEST_USER' must only use letters, digits, _ or -." ;; esac
 GUEST_HOME=$DPREFIX/Users/$GUEST_USER
 
+lap "checks done"
 # ---- 3. Project scripts rendered for this user ---------------------------------------
 if [ ! -f "$PROJECT/.version" ] || [ "$(cat "$PROJECT/.version")" != "$BUILD" ]; then
 	rm -rf "$PROJECT"
@@ -163,6 +169,7 @@ if [ ! -f .configured ] || [ "$(cat .configured)" != "$STAMP" ]; then
 	echo "$STAMP" > .configured
 fi
 
+lap "project ready"
 # ---- 4. Prefix and per-user overlays --------------------------------------------------
 if [ ! -f "$GUEST_HOME/.darling-lol-runtime" ] || [ "$(cat "$GUEST_HOME/.darling-lol-runtime")" != "$BUILD" ]; then
 	new_prefix=
@@ -183,6 +190,7 @@ if [ ! -f "$GUEST_HOME/.darling-lol-runtime" ] || [ "$(cat "$GUEST_HOME/.darling
 	echo "$BUILD" > "$GUEST_HOME/.darling-lol-runtime"
 fi
 
+lap "prefix ready"
 # ---- 5. Riot ----------------------------------------------------------------------------
 case "${1:-}" in
 	--shell) shift; exec darling shell "$@" ;;
@@ -211,5 +219,6 @@ if ! { [ -f "$BASE/autoplay.pid" ] && kill -0 "$(cat "$BASE/autoplay.pid")" 2>/d
 		"$RT/share/darling-lol/autoplay.py" </dev/null >"$BASE/autoplay.log" 2>&1 &
 	echo $! > "$BASE/autoplay.pid"
 fi
+lap "starting the Riot Client"
 note "Starting the Riot Client... (the first window can take up to a minute)"
 exec sh scripts/run.sh

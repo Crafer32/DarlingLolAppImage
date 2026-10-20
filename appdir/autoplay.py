@@ -213,6 +213,9 @@ def launch():
         if not lock:
             continue
         port, password = lock
+        if waiting_for is None:
+            log("Riot Client is up (local API)")
+            waiting_for = "api"
         try:
             status, _ = request(port, password, "GET", "/rso-auth/v1/authorization")
             if status != 200:
