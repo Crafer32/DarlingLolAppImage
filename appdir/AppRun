@@ -93,6 +93,34 @@ if [ ! -f "$RT/.complete" ]; then
 	for old in "$BASE"/runtime/*; do [ "$old" = "$RT" ] || rm -rf "$old"; done
 fi
 
+# ---- Menu entry: a launcher in the applications menu pointing at this AppImage, refreshed when
+# the file is moved or renamed. DARLING_LOL_NO_DESKTOP=1 skips it.
+if [ -n "${APPIMAGE:-}" ] && [ -z "${DARLING_LOL_NO_DESKTOP:-}" ]; then
+	apps=${XDG_DATA_HOME:-$HOME/.local/share}/applications
+	icons=${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps
+	entry=$apps/darling-lol.desktop
+	if ! grep -qF "Exec=\"$APPIMAGE\"" "$entry" 2>/dev/null; then
+		mkdir -p "$apps" "$icons"
+		cp -f "$APPDIR/darling-lol.png" "$icons/darling-lol.png" 2>/dev/null || true
+		cat > "$entry" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=League of Legends (darling-lol)
+Comment=League of Legends for macOS on Darling, rootless
+Exec="$APPIMAGE"
+Icon=darling-lol
+Terminal=false
+Categories=Game;
+Actions=Shutdown;
+
+[Desktop Action Shutdown]
+Name=Stop Darling
+Exec="$APPIMAGE" --shutdown
+DESKTOP
+		command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1 || true
+	fi
+fi
+
 # `darling` wrapper: darlingserver outlives this launcher, and every descriptor it inherits from
 # the AppImage runtime (the mount, the runtime's pipe) keeps the AppImage mounted forever. Start
 # darling with only stdin/stdout/stderr.

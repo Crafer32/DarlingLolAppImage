@@ -31,6 +31,7 @@ Client leaves background agents running, so without this it would keep going). S
 | `RCLOL_AUTO_SHUTDOWN_DELAY` | `90` | seconds to wait before stopping Darling |
 | `RCLOL_CLOSE_CLIENT_IN_GAME` | `1` | `0` keeps the League client open during matches (in-client chat) |
 | `DARLING_LOL_HOME` | `~/.darling-lol` | where everything is stored |
+| `DARLING_LOL_NO_DESKTOP` | unset | `1` skips the applications menu entry the AppImage adds for itself |
 
 Everything goes into one folder, `~/.darling-lol`. If something breaks, or you just want to try
 it and leave no trace, delete that folder and you're back to a clean state:
