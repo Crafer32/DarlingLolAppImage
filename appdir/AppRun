@@ -30,8 +30,10 @@ os.execv("/bin/sh", ["/bin/sh"] + sys.argv[1:])' "$0" "$@"
 fi
 APPDIR=${APPDIR:-$(dirname "$(readlink -f "$0")")}
 VERSION=$(cat "$APPDIR/usr/share/darling-lol/VERSION")
+# unique per build (older AppImages only have VERSION)
+BUILD=$(cat "$APPDIR/usr/share/darling-lol/BUILD" 2>/dev/null || echo "$VERSION")
 BASE=${DARLING_LOL_HOME:-$HOME/.darling-lol}
-RT=$BASE/runtime/$VERSION
+RT=$BASE/runtime/$BUILD
 export DPREFIX=${DPREFIX:-$BASE/prefix}
 export RCLOL_REGION=${RCLOL_REGION:-EUW}
 export MESA_SHADER_CACHE_DIR=${MESA_SHADER_CACHE_DIR:-$BASE/cache}
@@ -112,22 +114,22 @@ case "$GUEST_USER" in *[!A-Za-z0-9_-]*) die "User name '$GUEST_USER' must only u
 GUEST_HOME=$DPREFIX/Users/$GUEST_USER
 
 # ---- 3. Project scripts rendered for this user ---------------------------------------
-if [ ! -f "$PROJECT/.version" ] || [ "$(cat "$PROJECT/.version")" != "$VERSION" ]; then
+if [ ! -f "$PROJECT/.version" ] || [ "$(cat "$PROJECT/.version")" != "$BUILD" ]; then
 	rm -rf "$PROJECT"
 	mkdir -p "$PROJECT"
 	cp -a "$RT/share/darling-lol/project/." "$PROJECT/"
-	echo "$VERSION" > "$PROJECT/.version"
+	echo "$BUILD" > "$PROJECT/.version"
 fi
 cd "$PROJECT"
 # Render the launcher scripts only when something they depend on changed
-STAMP="$VERSION|$GUEST_USER|$DPREFIX|$RT"
+STAMP="$BUILD|$GUEST_USER|$DPREFIX|$RT"
 if [ ! -f .configured ] || [ "$(cat .configured)" != "$STAMP" ]; then
 	python3 scripts/configure.py --guest-user "$GUEST_USER" --prefix "$DPREFIX" --sdk "$RT/libexec/darling" >/dev/null
 	echo "$STAMP" > .configured
 fi
 
 # ---- 4. Prefix and per-user overlays --------------------------------------------------
-if [ ! -f "$GUEST_HOME/.darling-lol-runtime" ] || [ "$(cat "$GUEST_HOME/.darling-lol-runtime")" != "$VERSION" ]; then
+if [ ! -f "$GUEST_HOME/.darling-lol-runtime" ] || [ "$(cat "$GUEST_HOME/.darling-lol-runtime")" != "$BUILD" ]; then
 	new_prefix=
 	[ -e "$DPREFIX" ] || new_prefix=1
 	note "Preparing the macOS prefix (first time only)..."
@@ -143,7 +145,7 @@ if [ ! -f "$GUEST_HOME/.darling-lol-runtime" ] || [ "$(cat "$GUEST_HOME/.darling
 		python3 tools/configure-darling-platform.py --prefix "$DPREFIX" --provision --write >/dev/null ||
 			say "Could not give the prefix its own platform identity (non-fatal)."
 	fi
-	echo "$VERSION" > "$GUEST_HOME/.darling-lol-runtime"
+	echo "$BUILD" > "$GUEST_HOME/.darling-lol-runtime"
 fi
 
 # ---- 5. Riot ----------------------------------------------------------------------------

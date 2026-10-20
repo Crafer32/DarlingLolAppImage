@@ -46,6 +46,9 @@ rm -rf $A/usr/share/darling-lol/project/scripts/__pycache__
 cp /repo/appdir/fonts.conf $A/usr/share/darling-lol/
 install -m755 /repo/appdir/watch.py $A/usr/share/darling-lol/watch.py
 echo "$V" > $A/usr/share/darling-lol/VERSION
+# Build ID: two builds of the same version get different runtime folders, so testing a rebuild
+# never reuses a stale unpacked runtime
+echo "$V-$(date -u +%Y%m%d%H%M%S)" > $A/usr/share/darling-lol/BUILD
 # Lanzador + escritorio
 install -m755 /repo/appdir/AppRun $A/AppRun
 cp $P/darling-lol.png $A/darling-lol.png; cp $P/darling-lol.png $A/.DirIcon
