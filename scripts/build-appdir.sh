@@ -15,7 +15,7 @@ rm -rf $A/usr/libexec/darling/usr/share/man $A/usr/libexec/darling/usr/share/vim
 # them, and the launcher scripts run on the host's python3
 D=$A/usr/libexec/darling
 rm -rf $D/System/Library/Frameworks/Ruby.framework $D/System/Library/Frameworks/Python.framework \
-	$D/usr/lib/ruby $D/usr/lib/libruby*.dylib
+	$D/usr/lib/ruby $D/usr/lib/libruby*.dylib $D/Library/Ruby $D/Library/Python
 for b in erb gem irb rake rdoc ri ruby testrb python python2.7 python2.7-config python-config pydoc pydoc2.7; do rm -f $D/usr/bin/$b; done
 # Librerías del host de ABI variable, empaquetadas junto a mldr
 B=$A/usr/libexec/darling/usr/lib/host-bundle; mkdir -p $B
@@ -44,6 +44,7 @@ mkdir -p $A/usr/share/darling-lol/project
 cp -a $P/scripts $P/tools $P/upstream $P/requirements.txt $P/LICENSE $P/NOTICE.md $A/usr/share/darling-lol/project/
 rm -rf $A/usr/share/darling-lol/project/scripts/__pycache__
 cp /repo/appdir/fonts.conf $A/usr/share/darling-lol/
+install -m755 /repo/appdir/watch.py $A/usr/share/darling-lol/watch.py
 echo "$V" > $A/usr/share/darling-lol/VERSION
 # Lanzador + escritorio
 install -m755 /repo/appdir/AppRun $A/AppRun

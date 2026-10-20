@@ -156,5 +156,17 @@ if [ ! -d "$DPREFIX/Users/Shared/Riot Games/Riot Client.app" ] && [ ! -e "$DPREF
 	say "Riot Client is not installed yet: starting the installer (region $RCLOL_REGION)."
 	exec sh scripts/installer.sh "$(echo "$RCLOL_REGION" | tr '[:upper:]' '[:lower:]')"
 fi
+# Darling outlives the windows (the Riot Client leaves background agents running), so a small
+# watcher stops it once the Riot Client and League have been closed for a while.
+# RCLOL_AUTO_SHUTDOWN=0 turns it off; RCLOL_AUTO_SHUTDOWN_DELAY sets the wait in seconds.
+start_watcher() {
+	pidfile=$BASE/watch.pid
+	if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then return; fi
+	DARLING_LOL_MLDR="$RT/libexec/darling/usr/libexec/darling/mldr" DARLING_LOL_DARLING="$BASE/bin/darling" \
+		setsid python3 -c 'import os, sys; os.closerange(3, 65536); os.execv(sys.executable, [sys.executable] + sys.argv[1:])' \
+		"$RT/share/darling-lol/watch.py" </dev/null >>"$BASE/watch.log" 2>&1 &
+	echo $! > "$pidfile"
+}
+start_watcher
 note "Starting the Riot Client... (the first window can take up to a minute)"
 exec sh scripts/run.sh
