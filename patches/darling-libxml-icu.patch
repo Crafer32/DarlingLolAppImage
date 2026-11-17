@@ -1,0 +1,13 @@
+--- a/src/external/darlingserver/src/cs_verify.cpp	2026-11-17 18:15:28.301531104 +0100
++++ b/src/external/darlingserver/src/cs_verify.cpp	2026-11-17 18:15:28.313497599 +0100
+@@ -28,6 +28,10 @@
+ #include <mutex>
+ #include <vector>
+ 
++// libxml2 built with ICU (Debian/Ubuntu) pulls in C++ templates: include it before extern "C"
++#include <libxml/parser.h>
++#include <libxml/tree.h>
++
+ extern "C" {
+ #include "dc_codesign.h"
+ #include <darlingserver/dc_entitlements.h>

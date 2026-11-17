@@ -1,9 +1,9 @@
 diff --git a/tools/build-riot-appkit-runtime.py b/tools/build-riot-appkit-runtime.py
-index 6f64261..02e11c8 100644
+index 4f3b4e9..5ef4e19 100644
 --- a/tools/build-riot-appkit-runtime.py
 +++ b/tools/build-riot-appkit-runtime.py
 @@ -15,7 +15,7 @@ link = shlex.split((framework / 'CMakeFiles/AppKit.dir/link.txt').read_text())
- for name in ['NSResponder', 'NSApplication', 'NSWindow', 'NSDisplay', 'NSView', 'NSThemeFrame', 'NSTextInput', 'NSBitmapImageRep', 'NSEvent.subproj/NSEvent', 'NSEvent.subproj/NSEvent_mouse']:
+ for name in ['NSResponder', 'NSApplication', 'NSWindow', 'NSDisplay', 'NSView', 'NSThemeFrame', 'NSTextInput', 'NSBitmapImageRep', 'NSSpellChecker', 'NSEvent.subproj/NSEvent', 'NSEvent.subproj/NSEvent_mouse']:
      obj = project / f'build/riot-{Path(name).name}.o'
      subprocess.run(['clang', *flags['C_DEFINES'], *flags['C_INCLUDES'], *flags['C_FLAGS'],
 -                    '-O3', '-march=native', '-mtune=generic', '-Wno-macro-redefined', '-c',
@@ -145,7 +145,7 @@ index 9c3d173..232ec45 100644
  subprocess.run(['clang', '-target', 'x86_64-apple-macosx11.0', '-fuse-ld=lld',
      '-nostdlib', '-isysroot', sdk, str(probe), '-lSystem', '-lobjc', '-framework', 'AppKit',
 diff --git a/tools/install-riot-presentation-runtime.sh b/tools/install-riot-presentation-runtime.sh
-index 220f394..6760c44 100644
+index aea40fc..783f144 100644
 --- a/tools/install-riot-presentation-runtime.sh
 +++ b/tools/install-riot-presentation-runtime.sh
 @@ -13,11 +13,11 @@ make -C "$build_dir/src/external/cfnetwork/src" CFNetwork -j8

@@ -7,9 +7,9 @@
 set -eu
 REPO=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK=${WORK:-$REPO/work}
-DARLING_LOL_REF=${DARLING_LOL_REF:-bbfa4c6}
+DARLING_LOL_REF=${DARLING_LOL_REF:-2a1150f}
 # open upstream pull requests applied on top (diffs in patches/upstream-prs/); #105 and #107 are merged
-UPSTREAM_PRS=${UPSTREAM_PRS-90 103 111 60-launcher}
+UPSTREAM_PRS=${UPSTREAM_PRS-}
 JOBS=${JOBS:-$(nproc)}
 IMAGE=darling-lol-appimage-build:noble
 mkdir -p "$WORK" "$REPO/release"
@@ -29,14 +29,18 @@ if [ "${STEP:-all}" = all ]; then
 	done
 	run 'git lfs install --skip-repo >/dev/null; python3 scripts/configure.py --guest-user lol --prefix /build/prefix && python3 scripts/prepare.py'
 	run 'sh /repo/scripts/build-ffmpeg.sh'
-	patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-rootless.patch"
+	git -C "$WORK/darling-lol/build/darling-src" apply "$REPO/patches/darling-rootless.patch"
+	# darlingserver includes libxml inside extern "C"; with an ICU-enabled libxml2 (Ubuntu) that breaks the build
+	if git -C "$WORK/darling-lol/build/darling-src" apply --check "$REPO/patches/darling-libxml-icu.patch" >/dev/null 2>&1; then
+		git -C "$WORK/darling-lol/build/darling-src" apply "$REPO/patches/darling-libxml-icu.patch"
+	fi
 	# soft FD limit fallback; darling-lol PR #107 makes the same change, so skip it when that's in
-	if patch -d "$WORK/darling-lol/build/darling-src" -p1 --dry-run -s -f < "$REPO/patches/darling-rootless-fdlimit.patch" >/dev/null; then
-		patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-rootless-fdlimit.patch"
+	if git -C "$WORK/darling-lol/build/darling-src" apply --check "$REPO/patches/darling-rootless-fdlimit.patch" >/dev/null 2>&1; then
+		git -C "$WORK/darling-lol/build/darling-src" apply "$REPO/patches/darling-rootless-fdlimit.patch"
 	fi
 	# darling-lol >= 6505ecf drags client-drawn windows natively (#87); keep ours only for older refs
-	if patch -d "$WORK/darling-lol/build/darling-src" -p1 --dry-run -s -f < "$REPO/patches/darling-window-drag.patch" >/dev/null; then
-		patch -d "$WORK/darling-lol/build/darling-src" -p1 < "$REPO/patches/darling-window-drag.patch"
+	if git -C "$WORK/darling-lol/build/darling-src" apply --check "$REPO/patches/darling-window-drag.patch" >/dev/null 2>&1; then
+		git -C "$WORK/darling-lol/build/darling-src" apply "$REPO/patches/darling-window-drag.patch"
 	else
 		echo "darling-window-drag.patch does not apply (darling-lol has native window drag): skipped"
 	fi
